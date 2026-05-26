@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>CalTrack</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#07090f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#fff;direction:rtl}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+.spin{animation:spin 1s linear infinite}
+input,textarea,button{font-family:inherit}
+input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:2px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+"use strict";
+var h = React.createElement;
+var BG = "#07090f", CARD = "rgba(255,255,255,0.04)", BORD = "rgba(255,255,255,0.07)";
+var TODAY = new Date().toISOString().split("T")[0];
+var useState = React.useState, useEffect = React.useEffect, useRef = React.useRef, useCallback = React.useCallback;
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function makeSB(url, key) {
+  var base = url.replace(/\/$/, "");
+  return function(table, method, body, qs, upsert) {
+    method = method || "GET"; qs = qs || ""; upsert = upsert || false;
+    var headers = { apikey: key, Authorization: "Bearer " + key, "Content-Type": "application/json" };
+    if (method === "POST") headers["Prefer"] = upsert ? "resolution=merge-duplicates,return=representation" : "return=representation";
+    if (method === "PATCH") headers["Prefer"] = "return=representation";
+    return fetch(base + "/rest/v1/" + table + qs, {
+      method: method, headers: headers, body: body ? JSON.stringify(body) : undefined
+    }).then(function(res) {
+      if (res.status === 204 || method === "DELETE") return null;
+      return res.json().then(function(data) {
+        if (!res.ok) throw new Error(JSON.stringify(data));
+        return data;
+      });
+    });
+  };
+}
+
+function analyzeFood(desc, img64) {
+  var content = [];
+  if (img64) content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: img64 } });
+  var ctx = img64 ? ("Look at this food image" + (desc ? ' and description: "' + desc + '"' : "") + ".") : ('Food: "' + desc + '"');
+  content.push({ type: "text", text: ctx + "\nReturn ONLY valid JSON: {\"meal_name\":\"\u05e9\u05dd \u05d1\u05e2\u05d1\u05e8\u05d9\u05ea\",\"calories\":0,\"protein\":0,\"carbs\":0,\"fat\":0}" });
+  return fetch("/api/claude", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 500, messages: [{ role: "user", content: content }] })
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    var text = (d.content && d.content[0] && d.content[0].text) ? d.content[0].text : "{}";
+    return JSON.parse(text.replace(/```[a-z]*/g, "").replace(/```/g, "").trim());
+  });
+}
+
+function getRecommendations(remaining, p, c, f) {
+  var hr = new Date().getHours();
+  var mealType = hr < 11 ? "\u05d0\u05e8\u05d5\u05d7\u05ea \u05d1\u05d5\u05e7\u05e8" : hr < 15 ? "\u05d0\u05e8\u05d5\u05d7\u05ea \u05e6\u05d4\u05e8\u05d9\u05d9\u05dd" : hr < 19 ? "\u05d7\u05d8\u05d9\u05e3 / \u05d0\u05e8\u05d5\u05d7\u05ea \u05d1\u05d9\u05e0\u05d9\u05d9\u05dd" : "\u05d0\u05e8\u05d5\u05d7\u05ea \u05e2\u05e8\u05d1";
+  var prompt = "\u05d0\u05ea\u05d4 \u05ea\u05d6\u05d5\u05e0\u05d0\u05d9. \u05d9\u05e9 \u05dc\u05d9 " + remaining + " \u05e7\u05e7\"\u05dc \u05e0\u05d5\u05ea\u05e8\u05d5\u05ea \u05dc\u05d4\u05d9\u05d5\u05dd (" + mealType + "). \u05d0\u05db\u05dc\u05ea\u05d9: \u05d7\u05dc\u05d1\u05d5\u05df " + Math.round(p) + "g, \u05e4\u05d7\u05de\u05d9\u05de\u05d5\u05ea " + Math.round(c) + "g, \u05e9\u05d5\u05de\u05df " + Math.round(f) + "g. \u05d4\u05e6\u05e2 3 \u05d0\u05e8\u05d5\u05d7\u05d5\u05ea \u05de\u05ea\u05d0\u05d9\u05de\u05d5\u05ea. \u05d4\u05d7\u05d6\u05e8 JSON \u05d1\u05dc\u05d1\u05d3:\n[{\"meal_name\":\"\u05e9\u05dd\",\"calories\":0,\"protein\":0,\"carbs\":0,\"fat\":0,\"why\":\"\u05e1\u05d9\u05d1\u05d4 \u05e7\u05e6\u05e8\u05d4\"}]";
+  return fetch("/api/claude", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 800, messages: [{ role: "user", content: prompt }] })
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    var text = (d.content && d.content[0] && d.content[0].text) ? d.content[0].text : "[]";
+    return JSON.parse(text.replace(/```[a-z]*/g, "").replace(/```/g, "").trim());
+  });
+}
+
+function fileToB64(file) {
+  return new Promise(function(res, rej) {
+    var r = new FileReader();
+    r.onload = function() { res(r.result.split(",")[1]); };
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+}
+
+function fmtDate(d) {
+  return new Date(d + "T12:00:00").toLocaleDateString("he-IL", { day: "numeric", month: "short" });
+}
+
+// ── SVG Icons ─────────────────────────────────────────────────────────────────
+function IconPlus(p) { return h("svg",{width:p.size||24,height:p.size||24,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",strokeWidth:2,strokeLinecap:"round",strokeLinejoin:"round"},h("line",{x1:12,y1:5,x2:12,y2:19}),h("line",{x1:5,y1:12,x2:19,y2:12})); }
+function IconEdit(p) { return h("svg",{width:p.size||24,height:p.size||24,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",strokeWidth:2,strokeLinecap:"round",strokeLinejoin:"round"},h("path",{d:"M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"})); }
+function IconTrash(p) { return h("svg",{width:p.size||24,height:p.size||24,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",strokeWidth:2,strokeLinecap:"round",strokeLinejoin:"round"},h("polyline",{points:"3 6 5 6 21 6"}),h("path",{d:"M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"}),h("path",{d:"M10 11v6"}),h("path",{d:"M14 11v6"}),h("path",{d:"M9 6V4h6v2"})); }
+function IconX(p) { return h("svg",{width:p.size||24,height:p.size||24,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",strokeWidth:2,strokeLinecap:"round",strokeLinejoin:"round"},h("line",{x1:18,y1:6,x2:6,y2:18}),h("line",{x1:6,y1:6,x2:18,y2:18})); }
+function IconLoader(p) { return h("svg",{width:p.size||24,height:p.size||24,viewBox:"0 0 24 24",fill:"none",stroke:p.color||"currentColor",strokeWidth:2,strokeLinecap:"round",strokeLinejoin:"round",className:"spin",style:p.style||{}},h("path",{d:"M21 12a9 9 0 1 1-6.219-8.56"})); }
+function IconChevL(p) { return h("svg",{width:p.size||24,height:p.size||24,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",strokeWidth:2,strokeLinecap:"round",strokeLinejoin:"round"},h("polyline",{points:"15 18 9 12 15 6"})); }
+function IconChevR(p) { return h("svg",{width:p.size||24,height:p.size||24,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",strokeWidth:2,strokeLinecap:"round",strokeLinejoin:"round"},h("polyline",{points:"9 18 15 12 9 6"})); }
+function IconHome(p) { return h("svg",{width:p.size||22,height:p.size||22,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",strokeWidth:p.sw||1.5,strokeLinecap:"round",strokeLinejoin:"round"},h("path",{d:"M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"}),h("polyline",{points:"9 22 9 12 15 12 15 22"})); }
+function IconClock(p) { return h("svg",{width:p.size||22,height:p.size||22,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",strokeWidth:p.sw||1.5,strokeLinecap:"round",strokeLinejoin:"round"},h("circle",{cx:12,cy:12,r:10}),h("polyline",{points:"12 6 12 12 16 14"})); }
+function IconBkmk(p) { return h("svg",{width:p.size||22,height:p.size||22,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",strokeWidth:p.sw||1.5,strokeLinecap:"round",strokeLinejoin:"round"},h("path",{d:"M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"})); }
+function IconCog(p) { return h("svg",{width:p.size||22,height:p.size||22,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",strokeWidth:p.sw||1.5,strokeLinecap:"round",strokeLinejoin:"round"},h("circle",{cx:12,cy:12,r:3}),h("path",{d:"M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"})); }
+function IconSpark(p) { return h("svg",{width:p.size||18,height:p.size||18,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",strokeWidth:2,strokeLinecap:"round",strokeLinejoin:"round"},h("path",{d:"M12 3l1.88 5.76L20 10.5l-5.76 1.88L12 18l-1.88-5.76L4 10.5l5.76-1.88L12 3z"})); }
+function IconRefresh(p) { return h("svg",{width:p.size||16,height:p.size||16,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",strokeWidth:2,strokeLinecap:"round",strokeLinejoin:"round"},h("polyline",{points:"23 4 23 10 17 10"}),h("polyline",{points:"1 20 1 14 7 14"}),h("path",{d:"M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"})); }
+
+// ── Donut Chart (pure SVG) ────────────────────────────────────────────────────
+function DonutChart(props) {
+  var p = props.p, c = props.c, f = props.f, size = props.size || 68, ir = props.ir || 18, or2 = props.or2 || 32;
+  var rawData = [{v: Math.round(p), fill: "#60a5fa"}, {v: Math.round(c), fill: "#fbbf24"}, {v: Math.round(f), fill: "#f472b6"}].filter(function(d) { return d.v > 0; });
+  if (!rawData.length) return null;
+  var total = rawData.reduce(function(s, d) { return s + d.v; }, 0) || 1;
+  var angle = -Math.PI / 2;
+  var cx = size / 2, cy = size / 2;
+  var slices = rawData.map(function(d) {
+    var sweep = (d.v / total) * 2 * Math.PI;
+    var x1 = cx + or2 * Math.cos(angle), y1 = cy + or2 * Math.sin(angle);
+    angle += sweep;
+    var x2 = cx + or2 * Math.cos(angle), y2 = cy + or2 * Math.sin(angle);
+    var large = sweep > Math.PI ? 1 : 0;
+    return { path: "M " + cx + " " + cy + " L " + x1 + " " + y1 + " A " + or2 + " " + or2 + " 0 " + large + " 1 " + x2 + " " + y2 + " Z", fill: d.fill };
+  });
+  return h("svg", { width: size, height: size },
+    slices.map(function(s, i) { return h("path", { key: i, d: s.path, fill: s.fill }); }),
+    h("circle", { cx: cx, cy: cy, r: ir, fill: BG }));
+}
+
+// ── Bar Chart (pure SVG) ──────────────────────────────────────────────────────
+function BarChart(props) {
+  var data = props.data;
+  var W = 340, H = 160, PB = 24, PT = 8, PL = 4, PR = 4;
+  var cW = W - PL - PR, cH = H - PB - PT;
+  if (!data || !data.length) return h("div", { style: { textAlign: "center", color: "rgba(255,255,255,0.15)", padding: "40px 0", fontSize: 13 } }, "\u05d0\u05d9\u05df \u05e0\u05ea\u05d5\u05e0\u05d9\u05dd \u05e2\u05d3\u05d9\u05d9\u05df");
+  var vals = data.map(function(d) { return d.balance; });
+  var maxAbs = Math.max.apply(null, vals.map(function(v) { return Math.abs(v); }).concat([1]));
+  var barW = Math.max(2, (cW / data.length) - 2);
+  var zero = PT + cH / 2;
+  var step = Math.max(1, Math.floor(data.length / 6));
+  var bars = data.map(function(d, i) {
+    var x = PL + (cW / data.length) * i + (cW / data.length - barW) / 2;
+    var bh = Math.abs(d.balance) / maxAbs * (cH / 2);
+    var y = d.balance <= 0 ? zero - bh : zero;
+    return h("rect", { key: i, x: x, y: y, width: barW, height: Math.max(bh, 1), fill: d.balance <= 0 ? "#10b981" : "#f43f5e", fillOpacity: 0.85, rx: 2 });
+  });
+  var labels = [];
+  data.forEach(function(d, i) {
+    if (i % step !== 0) return;
+    var x = PL + (cW / data.length) * i + (cW / data.length) / 2;
+    labels.push(h("text", { key: i, x: x, y: H - 6, textAnchor: "middle", fill: "#475569", fontSize: 9 }, fmtDate(d.date)));
+  });
+  return h("svg", { width: "100%", viewBox: "0 0 " + W + " " + H, style: { overflow: "visible" } },
+    h("line", { x1: PL, y1: zero, x2: W - PR, y2: zero, stroke: "rgba(255,255,255,0.08)", strokeWidth: 1 }),
+    bars, labels);
+}
+
+// ── Ring ──────────────────────────────────────────────────────────────────────
+function Ring(props) {
+  var eaten = props.eaten, target = props.target;
+  var S = 210, sw = 20, r = (S - sw) / 2, circ = 2 * Math.PI * r;
+  var pct = Math.min(Math.max(eaten / (target || 1), 0), 1);
+  var over = eaten > target;
+  var remaining = target - eaten;
+  var gradId = over ? "rg2" : "rg";
+  return h("div", { style: { width: S, height: S, position: "relative", margin: "0 auto" } },
+    h("svg", { width: S, height: S, style: { position: "absolute", transform: "rotate(-90deg)" } },
+      h("defs", null,
+        h("linearGradient", { id: "rg", x1: "0%", y1: "0%", x2: "100%", y2: "0%" },
+          h("stop", { offset: "0%", stopColor: "#4f46e5" }), h("stop", { offset: "100%", stopColor: "#7c3aed" })),
+        h("linearGradient", { id: "rg2", x1: "0%", y1: "0%", x2: "100%", y2: "0%" },
+          h("stop", { offset: "0%", stopColor: "#f43f5e" }), h("stop", { offset: "100%", stopColor: "#fb7185" }))),
+      h("circle", { cx: S/2, cy: S/2, r: r, fill: "none", stroke: "rgba(255,255,255,0.05)", strokeWidth: sw }),
+      h("circle", { cx: S/2, cy: S/2, r: r, fill: "none", stroke: "url(#" + gradId + ")", strokeWidth: sw, strokeLinecap: "round",
+        strokeDasharray: (pct * circ) + " " + circ, style: { transition: "stroke-dasharray 0.6s cubic-bezier(.4,0,.2,1)" } })),
+    h("div", { style: { position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center" } },
+      h("div", { style: { fontSize: 13, color: "rgba(255,255,255,0.3)", letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 } }, over ? "\u26a0\ufe0f \u05e2\u05d5\u05d3\u05e3" : "\u05e0\u05d5\u05ea\u05e8"),
+      h("div", { style: { fontSize: 44, fontWeight: 900, color: over ? "#fb7185" : "#fff", lineHeight: 1, letterSpacing: -2 } }, Math.abs(remaining).toLocaleString()),
+      h("div", { style: { fontSize: 11, color: "rgba(255,255,255,0.25)", marginTop: 6 } }, eaten.toLocaleString() + " / " + target.toLocaleString() + " \u05e7\u05e7\u05f4\u05dc")));
+}
+
+// ── Atoms ─────────────────────────────────────────────────────────────────────
+function GlassCard(props) {
+  return h("div", { style: Object.assign({ background: CARD, border: "1px solid " + BORD, borderRadius: 20, padding: 16 }, props.style || {}) }, props.children);
+}
+function StatChip(props) {
+  return h("div", { style: { background: CARD, border: "1px solid " + BORD, borderRadius: 16, padding: "10px 4px", textAlign: "center", flex: 1 } },
+    h("div", { style: { fontSize: 20, fontWeight: 900, color: props.color || "#fff" } }, (props.val || 0).toLocaleString()),
+    h("div", { style: { fontSize: 10, color: "rgba(255,255,255,0.3)", marginTop: 2 } }, props.label));
+}
+function MLRow(props) {
+  return h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 } },
+    h("div", { style: { display: "flex", alignItems: "center", gap: 6 } },
+      h("span", { style: { width: 7, height: 7, borderRadius: "50%", background: props.c, display: "inline-block" } }),
+      h("span", { style: { color: "rgba(255,255,255,0.4)" } }, props.l)),
+    h("span", { style: { color: "rgba(255,255,255,0.7)", fontWeight: 600 } }, Math.round(props.g) + "g"));
+}
+function FRow(props) {
+  var val = props.abs ? Math.abs(props.val) : props.val;
+  return h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 4, paddingBottom: 4 } },
+    h("span", { style: { fontSize: 12, color: "rgba(255,255,255,0.4)" } }, props.label),
+    h("span", { style: { fontSize: 13, fontWeight: 700, color: props.color || "rgba(255,255,255,0.8)" } }, val.toLocaleString() + " \u05e7\u05e7\u05f4\u05dc"));
+}
+function EntryRow(props) {
+  return h("div", { style: { display: "flex", alignItems: "center", gap: 10, background: CARD, border: "1px solid " + BORD, borderRadius: 16, padding: "12px 14px" } },
+    h("div", { style: { flex: 1, minWidth: 0 } },
+      h("div", { style: { fontSize: 14, fontWeight: 600, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, props.title),
+      props.sub ? h("div", { style: { fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 2 } }, props.sub) : null),
+    h("span", { style: { fontSize: 13, fontWeight: 700, color: props.valColor || "#fff", flexShrink: 0 } }, props.val),
+    props.onEdit ? h("button", { onClick: props.onEdit, style: { background: "none", border: "none", color: "rgba(255,255,255,0.2)", cursor: "pointer", padding: 4, display: "flex" } }, h(IconEdit, { size: 14 })) : null,
+    h("button", { onClick: props.onDel, style: { background: "none", border: "none", color: "rgba(255,255,255,0.2)", cursor: "pointer", padding: 4, display: "flex" } }, h(IconTrash, { size: 14 })));
+}
+function SecHdr(props) {
+  return h("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 } },
+    h("span", { style: { fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: 1 } }, props.title),
+    h("button", { onClick: props.onAdd, style: { background: props.addColor || "#4f46e5", border: "none", borderRadius: "50%", width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff" } }, h(IconPlus, { size: 16 })));
+}
+function Empty(props) { return h("div", { style: { textAlign: "center", color: "rgba(255,255,255,0.15)", fontSize: 13, padding: "20px 0" } }, props.text); }
+function MHead(props) {
+  return h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 } },
+    h("h3", { style: { fontSize: 18, fontWeight: 900, color: "#fff", margin: 0 } }, props.title),
+    h("button", { onClick: props.onClose, style: { background: "rgba(255,255,255,0.08)", border: "none", borderRadius: "50%", width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "rgba(255,255,255,0.6)" } }, h(IconX, { size: 16 })));
+}
+function FInput(props) {
+  return h("div", { style: { marginBottom: 12 } },
+    h("label", { style: { fontSize: 11, color: "rgba(255,255,255,0.35)", display: "block", marginBottom: 6, letterSpacing: 0.5 } }, props.label),
+    h("input", { type: props.type || "text", value: props.value, placeholder: props.placeholder || "", onChange: function(e) { props.onChange(e.target.value); },
+      style: { width: "100%", background: "rgba(255,255,255,0.06)", border: "1px solid " + BORD, borderRadius: 12, padding: "12px 14px", fontSize: 14, color: "#fff", outline: "none", boxSizing: "border-box" },
+      onFocus: function(e) { e.target.style.borderColor = "#6366f1"; },
+      onBlur: function(e) { e.target.style.borderColor = BORD; } }));
+}
+function GradBtn(props) {
+  return h("button", { onClick: props.onClick, disabled: props.disabled,
+    style: Object.assign({ width: "100%", background: props.disabled ? "rgba(255,255,255,0.08)" : (props.gradient || "linear-gradient(135deg,#4f46e5,#7c3aed)"), border: "none", borderRadius: 14, padding: "14px 0", fontSize: 15, fontWeight: 700, color: props.disabled ? "rgba(255,255,255,0.3)" : "#fff", cursor: props.disabled ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, transition: "opacity .2s" }, props.style || {}) },
+    props.children);
+}
+
+// ── Bottom Nav ────────────────────────────────────────────────────────────────
+function BottomNav(props) {
+  var screen = props.screen, setScreen = props.setScreen;
+  var tabs = [
+    { id: "today", icon: IconHome, label: "\u05d4\u05d9\u05d5\u05dd" },
+    { id: "history", icon: IconClock, label: "\u05d4\u05d9\u05e1\u05d8\u05d5\u05e8\u05d9\u05d4" },
+    { id: "saved", icon: IconBkmk, label: "\u05de\u05e0\u05d5\u05ea" },
+    { id: "settings", icon: IconCog, label: "\u05d4\u05d2\u05d3\u05e8\u05d5\u05ea" }
+  ];
+  return h("div", { style: { position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 20, background: "rgba(7,9,15,0.95)", backdropFilter: "blur(20px)", borderTop: "1px solid " + BORD } },
+    h("div", { style: { maxWidth: 520, margin: "0 auto", display: "grid", gridTemplateColumns: "repeat(4,1fr)" } },
+      tabs.map(function(tab) {
+        var active = screen === tab.id;
+        return h("button", { key: tab.id, onClick: function() { setScreen(tab.id); },
+          style: { background: "none", border: "none", display: "flex", flexDirection: "column", alignItems: "center", padding: "12px 0 16px", gap: 4, cursor: "pointer", color: active ? "#818cf8" : "rgba(255,255,255,0.25)", transition: "color .2s", WebkitTapHighlightColor: "transparent" } },
+          h(tab.icon, { size: 22, sw: active ? 2.5 : 1.5 }),
+          h("span", { style: { fontSize: 10, fontWeight: 600 } }, tab.label),
+          active ? h("div", { style: { width: 4, height: 4, borderRadius: "50%", background: "#818cf8", marginTop: -2 } }) : null);
+      })));
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+function SettingsScreen(props) {
+  var settings = props.settings, onSave = props.onSave;
+  var state = useState(String(settings.tdee));
+  var tdee = state[0], setTdee = state[1];
+  var state2 = useState(String(settings.goal_deficit));
+  var def = state2[0], setDef = state2[1];
+  var state3 = useState(false);
+  var ok = state3[0], setOk = state3[1];
+  var target = (parseInt(tdee) || 0) - (parseInt(def) || 0);
+  function save() {
+    onSave({ tdee: parseInt(tdee) || 2000, goal_deficit: parseInt(def) || 500 }).then(function() {
+      setOk(true); setTimeout(function() { setOk(false); }, 2000);
+    });
+  }
+  return h("div", { style: { paddingBottom: 8 } },
+    h("h1", { style: { fontSize: 26, fontWeight: 900, color: "#fff", marginBottom: 20 } }, "\u05d4\u05d2\u05d3\u05e8\u05d5\u05ea"),
+    h(GlassCard, { style: { marginBottom: 16 } },
+      h("div", { style: { fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.35)", letterSpacing: 1, textTransform: "uppercase", marginBottom: 16 } }, "\u05d9\u05e2\u05d3\u05d9\u05dd \u05e7\u05dc\u05d5\u05e8\u05d9\u05d9\u05dd"),
+      h(FInput, { label: "TDEE \u2014 \u05e9\u05e8\u05d9\u05e4\u05d4 \u05d9\u05d5\u05de\u05d9\u05ea \u05d1\u05e1\u05d9\u05e1\u05d9\u05ea (\u05e7\u05e7\u05f4\u05dc)", type: "number", value: tdee, onChange: setTdee, placeholder: "2000" }),
+      h(FInput, { label: "\u05d2\u05e8\u05e2\u05d5\u05df \u05d9\u05e2\u05d3 \u05d9\u05d5\u05de\u05d9 (\u05e7\u05e7\u05f4\u05dc)", type: "number", value: def, onChange: setDef, placeholder: "500" }),
+      h("div", { style: { background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 12, padding: "12px 14px", marginBottom: 16 } },
+        h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+          h("span", { style: { fontSize: 12, color: "rgba(255,255,255,0.4)" } }, "\u05d9\u05e2\u05d3 \u05d0\u05db\u05d9\u05dc\u05d4 \u05d9\u05d5\u05de\u05d9"),
+          h("span", { style: { fontSize: 24, fontWeight: 900, color: "#818cf8" } }, target.toLocaleString() + " \u05e7\u05e7\u05f4\u05dc")),
+        h("div", { style: { fontSize: 11, color: "rgba(255,255,255,0.2)", marginTop: 4 } }, "TDEE " + tdee + " \u2212 \u05d2\u05e8\u05e2\u05d5\u05df " + def + " = " + target)),
+      h(GradBtn, { onClick: save, gradient: ok ? "linear-gradient(135deg,#10b981,#059669)" : "linear-gradient(135deg,#4f46e5,#7c3aed)" }, ok ? "\u2705 \u05e0\u05e9\u05de\u05e8!" : "\u05e9\u05de\u05d5\u05e8 \u05d4\u05d2\u05d3\u05e8\u05d5\u05ea")),
+    h(GlassCard, null,
+      h("div", { style: { fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.35)", letterSpacing: 1, textTransform: "uppercase", marginBottom: 12 } }, "\u05d0\u05d5\u05d3\u05d5\u05ea"),
+      h("p", { style: { fontSize: 12, color: "rgba(255,255,255,0.3)", lineHeight: 1.6, margin: 0 } }, "CalTrack \u05de\u05e1\u05e0\u05db\u05e8\u05df \u05e0\u05ea\u05d5\u05e0\u05d9 Garmin \u05d0\u05d5\u05d8\u05d5\u05de\u05d8\u05d9\u05ea. \u05e0\u05d9\u05ea\u05d5\u05d7 \u05de\u05d6\u05d5\u05df \u05d1-AI \u05e2\u05f4\u05d9 Claude Sonnet. \u05e0\u05ea\u05d5\u05e0\u05d9\u05dd \u05de\u05d0\u05d5\u05d7\u05e1\u05e0\u05d9\u05dd \u05d1-Supabase.")));
+}
+
+// ── Food Modal ────────────────────────────────────────────────────────────────
+function FoodModal(props) {
+  var saved = props.saved, onAdd = props.onAdd, onClose = props.onClose;
+  var s1 = useState("text"); var tab = s1[0], setTab = s1[1];
+  var s2 = useState(""); var text = s2[0], setText = s2[1];
+  var s3 = useState(null); var img64 = s3[0], setImg64 = s3[1];
+  var s4 = useState(null); var result = s4[0], setResult = s4[1];
+  var s5 = useState(false); var busy = s5[0], setBusy = s5[1];
+  var s6 = useState(false); var saving = s6[0], setSaving = s6[1];
+  var s7 = useState(false); var saveAs = s7[0], setSaveAs = s7[1];
+  var s8 = useState(""); var err = s8[0], setErr = s8[1];
+  var fileRef = useRef();
+  function switchTab(t) { setTab(t); setResult(null); setErr(""); setText(""); setImg64(null); }
+  function analyze() {
+    if (!text && !img64) return;
+    setBusy(true); setErr(""); setResult(null);
+    analyzeFood(text, img64).then(function(r) {
+      setResult({ meal_name: r.meal_name || "", calories: r.calories || 0, protein: r.protein || 0, carbs: r.carbs || 0, fat: r.fat || 0 });
+    }).catch(function() { setErr("\u05e9\u05d2\u05d9\u05d0\u05d4 \u05d1\u05e0\u05d9\u05ea\u05d5\u05d7. \u05e0\u05e1\u05d4 \u05e9\u05d5\u05d1."); }).finally(function() { setBusy(false); });
+  }
+  function handleAdd() {
+    if (!result) return;
+    setSaving(true);
+    Promise.resolve(onAdd(result, saveAs)).finally(function() { setSaving(false); });
+  }
+  function setField(k, v) { setResult(function(r) { var n = Object.assign({}, r); n[k] = v; return n; }); }
+  var tabStyle = function(active) { return { flex: 1, padding: "9px 0", borderRadius: 10, fontSize: 12, fontWeight: 700, background: active ? "#4f46e5" : "transparent", border: "none", color: active ? "#fff" : "rgba(255,255,255,0.35)", cursor: "pointer" }; };
+  var fields = [["meal_name", "\u05e9\u05dd \u05d4\u05de\u05e0\u05d4", "text"], ["calories", "\u05e7\u05dc\u05d5\u05e8\u05d9\u05d5\u05ea", "number"], ["protein", "\u05d7\u05dc\u05d1\u05d5\u05df (g)", "number"], ["carbs", "\u05e4\u05d7\u05de\u05d9\u05de\u05d5\u05ea (g)", "number"], ["fat", "\u05e9\u05d5\u05de\u05df (g)", "number"]];
+  return h("div", { dir: "rtl" },
+    h(MHead, { title: "\u05d4\u05d5\u05e1\u05e3 \u05d0\u05e8\u05d5\u05d7\u05d4", onClose: onClose }),
+    h("div", { style: { display: "flex", background: "rgba(255,255,255,0.05)", borderRadius: 12, padding: 4, gap: 4, marginBottom: 16 } },
+      [["text", "\u{1f4dd} \u05d8\u05e7\u05e1\u05d8"], ["photo", "\u{1f4f7} \u05ea\u05de\u05d5\u05e0\u05d4"], ["saved", "\u{1f516} \u05e9\u05de\u05d5\u05e8\u05d5\u05ea"]].map(function(arr) {
+        return h("button", { key: arr[0], onClick: function() { switchTab(arr[0]); }, style: tabStyle(tab === arr[0]) }, arr[1]);
+      })),
+    tab === "text" && h(React.Fragment, null,
+      h("textarea", { placeholder: "\u05ea\u05d0\u05e8 \u05de\u05d4 \u05d0\u05db\u05dc\u05ea, \u05dc\u05de\u05e9\u05dc: 2 \u05e4\u05e8\u05d5\u05e1\u05d5\u05ea \u05dc\u05d7\u05dd \u05e2\u05dd \u05d2\u05d1\u05d9\u05e0\u05d4 9% \u05d5\u05d1\u05d9\u05e6\u05d4 \u05e7\u05e9\u05d4", value: text, onChange: function(e) { setText(e.target.value); },
+        style: { width: "100%", height: 90, background: "rgba(255,255,255,0.06)", border: "1px solid " + BORD, borderRadius: 12, padding: 12, fontSize: 14, color: "#fff", resize: "none", outline: "none", boxSizing: "border-box" } }),
+      h(GradBtn, { onClick: analyze, disabled: !text || busy, style: { marginTop: 10 } }, busy ? h(IconLoader, { size: 16 }) : null, busy ? " \u05de\u05e0\u05ea\u05d7..." : "\u2728 \u05e0\u05ea\u05d7")),
+    tab === "photo" && h(React.Fragment, null,
+      h("div", { onClick: function() { fileRef.current && fileRef.current.click(); }, style: { border: "2px dashed " + (img64 ? "#4f46e5" : BORD), borderRadius: 16, padding: "28px 0", textAlign: "center", cursor: "pointer", marginBottom: 10 } },
+        img64 ? h("div", { style: { color: "#10b981", fontWeight: 700 } }, "\u2705 \u05ea\u05de\u05d5\u05e0\u05d4 \u05e0\u05d8\u05e2\u05e0\u05d4") :
+        h(React.Fragment, null, h("div", { style: { fontSize: 36, marginBottom: 6 } }, "\u{1f4f7}"), h("div", { style: { fontSize: 13, color: "rgba(255,255,255,0.3)" } }, "\u05dc\u05d7\u05e5 \u05dc\u05d1\u05d7\u05d9\u05e8\u05ea \u05ea\u05de\u05d5\u05e0\u05d4"))),
+      h("input", { ref: fileRef, type: "file", accept: "image/*", style: { display: "none" }, onChange: function(e) { if (e.target.files && e.target.files[0]) fileToB64(e.target.files[0]).then(setImg64); } }),
+      h("textarea", { placeholder: "\u05ea\u05d9\u05d0\u05d5\u05e8 \u05e0\u05d5\u05e1\u05e3 (\u05d0\u05d5\u05e4\u05e6\u05d9\u05d5\u05e0\u05dc\u05d9)...", value: text, onChange: function(e) { setText(e.target.value); },
+        style: { width: "100%", height: 56, background: "rgba(255,255,255,0.06)", border: "1px solid " + BORD, borderRadius: 12, padding: 12, fontSize: 13, color: "#fff", resize: "none", outline: "none", boxSizing: "border-box", marginBottom: 10 } }),
+      h(GradBtn, { onClick: analyze, disabled: !img64 || busy }, busy ? h(IconLoader, { size: 16 }) : null, busy ? " \u05de\u05e0\u05ea\u05d7..." : "\u2728 \u05e0\u05ea\u05d7 \u05ea\u05de\u05d5\u05e0\u05d4")),
+    tab === "saved" && h("div", { style: { maxHeight: 300, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 } },
+      saved.length === 0 ? h(Empty, { text: "\u05d0\u05d9\u05df \u05de\u05e0\u05d5\u05ea \u05e9\u05de\u05d5\u05e8\u05d5\u05ea" }) :
+      saved.map(function(m) {
+        return h("button", { key: m.id, onClick: function() { onAdd({ meal_name: m.name, calories: m.calories, protein: m.protein, carbs: m.carbs, fat: m.fat }, false); },
+          style: { background: "rgba(255,255,255,0.05)", border: "1px solid " + BORD, borderRadius: 14, padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", textAlign: "right", width: "100%" } },
+          h("div", null,
+            h("div", { style: { fontSize: 14, fontWeight: 600, color: "#fff" } }, m.name),
+            m.protein > 0 ? h("div", { style: { fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 2 } }, "\u05d7\u05dc\u05f3 " + Math.round(m.protein) + "g \u00b7 \u05e4\u05d7\u05f3 " + Math.round(m.carbs) + "g \u00b7 \u05e9\u05d5\u05de\u05df " + Math.round(m.fat) + "g") : null),
+          h("span", { style: { fontSize: 15, fontWeight: 900, color: "#818cf8", marginRight: 8 } }, m.calories));
+      })),
+    err ? h("p", { style: { color: "#f43f5e", fontSize: 13, textAlign: "center", marginTop: 10 } }, err) : null,
+    result ? h("div", { style: { marginTop: 16, background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: 16, padding: 16 } },
+      h("div", { style: { fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.4)", marginBottom: 12 } }, "\u05ea\u05d5\u05e6\u05d0\u05d4 \u2014 \u05e0\u05d9\u05ea\u05df \u05dc\u05e2\u05e8\u05d5\u05da"),
+      h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 } },
+        fields.map(function(arr) {
+          var k = arr[0], lbl = arr[1], t = arr[2];
+          return h("div", { key: k, style: { gridColumn: k === "meal_name" ? "span 2" : "span 1" } },
+            h("div", { style: { fontSize: 11, color: "rgba(255,255,255,0.3)", marginBottom: 4 } }, lbl),
+            h("input", { type: t, value: result[k] != null ? result[k] : "", onChange: function(e) { setField(k, e.target.value); },
+              style: { width: "100%", background: "rgba(255,255,255,0.06)", border: "1px solid " + BORD, borderRadius: 10, padding: "9px 12px", fontSize: 14, color: "#fff", outline: "none", boxSizing: "border-box" } }));
+        })),
+      h("label", { style: { display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "rgba(255,255,255,0.5)", cursor: "pointer", margin: "12px 0" } },
+        h("input", { type: "checkbox", checked: saveAs, onChange: function(e) { setSaveAs(e.target.checked); }, style: { accentColor: "#6366f1" } }),
+        "\u05e9\u05de\u05d5\u05e8 \u05d2\u05dd \u05db\u05de\u05e0\u05d4 \u05e7\u05d1\u05d5\u05e2\u05d4"),
+      h(GradBtn, { onClick: handleAdd, disabled: saving, gradient: "linear-gradient(135deg,#10b981,#059669)" }, saving ? h(IconLoader, { size: 16 }) : "\u2705", " \u05d4\u05d5\u05e1\u05e3 \u05dc\u05d9\u05d5\u05de\u05df")) : null);
+}
+
+// ── Burn Modal ────────────────────────────────────────────────────────────────
+function BurnModal(props) {
+  var s1 = useState(""); var activity = s1[0], setActivity = s1[1];
+  var s2 = useState(""); var calories = s2[0], setCalories = s2[1];
+  return h("div", { dir: "rtl" },
+    h(MHead, { title: "\u05e9\u05e8\u05d9\u05e4\u05d4 \u05d9\u05d3\u05e0\u05d9\u05ea", onClose: props.onClose }),
+    h(FInput, { label: "\u05e4\u05e2\u05d9\u05dc\u05d5\u05ea", placeholder: "\u05db\u05d3\u05d5\u05e8\u05e1\u05dc 60 \u05d3\u05e7\u05d5\u05ea, \u05e8\u05d9\u05e6\u05d4 5 \u05e7\u05f4\u05de...", value: activity, onChange: setActivity }),
+    h(FInput, { label: "\u05e7\u05dc\u05d5\u05e8\u05d9\u05d5\u05ea \u05e9\u05e0\u05e9\u05e8\u05e4\u05d5", type: "number", placeholder: "400", value: calories, onChange: setCalories }),
+    h(GradBtn, { onClick: function() { if (activity && calories) props.onAdd({ activity: activity, calories: calories }); }, disabled: !activity || !calories, gradient: "linear-gradient(135deg,#ea580c,#f97316)" }, "\u05d4\u05d5\u05e1\u05e3 \u05e9\u05e8\u05d9\u05e4\u05d4"));
+}
+
+// ── Edit Modal ────────────────────────────────────────────────────────────────
+function EditModal(props) {
+  var isMeal = props.type === "meal";
+  var initVals = isMeal
+    ? { meal_name: props.item.meal_name, calories: props.item.calories, protein: props.item.protein || 0, carbs: props.item.carbs || 0, fat: props.item.fat || 0 }
+    : { activity: props.item.activity, calories: props.item.calories };
+  var sv = useState(initVals); var vals = sv[0], setVals = sv[1];
+  function setField(k, v) { setVals(function(p) { var n = Object.assign({}, p); n[k] = v; return n; }); }
+  var fields = isMeal
+    ? [["meal_name", "\u05e9\u05dd \u05d4\u05de\u05e0\u05d4", "text"], ["calories", "\u05e7\u05dc\u05d5\u05e8\u05d9\u05d5\u05ea", "number"], ["protein", "\u05d7\u05dc\u05d1\u05d5\u05df (g)", "number"], ["carbs", "\u05e4\u05d7\u05de\u05d9\u05de\u05d5\u05ea (g)", "number"], ["fat", "\u05e9\u05d5\u05de\u05df (g)", "number"]]
+    : [["activity", "\u05e4\u05e2\u05d9\u05dc\u05d5\u05ea", "text"], ["calories", "\u05e7\u05dc\u05d5\u05e8\u05d9\u05d5\u05ea", "number"]];
+  return h("div", { dir: "rtl" },
+    h(MHead, { title: "\u05e2\u05e8\u05d5\u05da " + (isMeal ? "\u05d0\u05e8\u05d5\u05d7\u05d4" : "\u05e9\u05e8\u05d9\u05e4\u05d4"), onClose: props.onClose }),
+    fields.map(function(arr) {
+      var k = arr[0], lbl = arr[1], t = arr[2];
+      return h(FInput, { key: k, label: lbl, type: t, value: vals[k] != null ? String(vals[k]) : "", onChange: function(v) { setField(k, v); } });
+    }),
+    h(GradBtn, { onClick: function() { props.onSave(props.item.id, vals); } }, "\u05e9\u05de\u05d5\u05e8 \u05e9\u05d9\u05e0\u05d5\u05d9\u05d9\u05dd"));
+}
+
+// ── Add Saved Modal ───────────────────────────────────────────────────────────
+function AddSavedModal(props) {
+  var sf = useState({ name: "", calories: "", protein: "", carbs: "", fat: "" });
+  var f = sf[0], setF = sf[1];
+  function setField(k, v) { setF(function(p) { var n = Object.assign({}, p); n[k] = v; return n; }); }
+  var fields = [["name", "\u05e9\u05dd \u05d4\u05de\u05e0\u05d4", "text"], ["calories", "\u05e7\u05dc\u05d5\u05e8\u05d9\u05d5\u05ea", "number"], ["protein", "\u05d7\u05dc\u05d1\u05d5\u05df (g)", "number"], ["carbs", "\u05e4\u05d7\u05de\u05d9\u05de\u05d5\u05ea (g)", "number"], ["fat", "\u05e9\u05d5\u05de\u05df (g)", "number"]];
+  return h("div", { dir: "rtl" },
+    h(MHead, { title: "\u05de\u05e0\u05d4 \u05e9\u05de\u05d5\u05e8\u05d4 \u05d7\u05d3\u05e9\u05d4", onClose: props.onClose }),
+    fields.map(function(arr) {
+      var k = arr[0], lbl = arr[1], t = arr[2];
+      return h(FInput, { key: k, label: lbl, type: t, value: f[k], onChange: function(v) { setField(k, v); }, placeholder: t === "number" ? "0" : "" });
+    }),
+    h(GradBtn, { onClick: function() { if (f.name && f.calories) props.onAdd({ name: f.name, calories: +f.calories, protein: +f.protein || 0, carbs: +f.carbs || 0, fat: +f.fat || 0 }); }, disabled: !f.name || !f.calories, gradient: "linear-gradient(135deg,#10b981,#059669)" }, "\u05e9\u05de\u05d5\u05e8"));
+}
+
+// ── Recommend Modal ───────────────────────────────────────────────────────────
+function RecommendModal(props) {
+  var remaining = props.remaining, protein = props.protein, carbs = props.carbs, fat = props.fat;
+  var sb = useState(true); var busy = sb[0], setBusy = sb[1];
+  var si = useState([]); var items = si[0], setItems = si[1];
+  var sa = useState([]); var added = sa[0], setAdded = sa[1];
+  var se = useState(""); var err = se[0], setErr = se[1];
+  function fetchRec() {
+    setBusy(true); setErr(""); setItems([]);
+    getRecommendations(remaining, protein, carbs, fat)
+      .then(function(data) { setItems(data); })
+      .catch(function() { setErr("\u05e9\u05d2\u05d9\u05d0\u05d4. \u05e0\u05e1\u05d4 \u05e9\u05d5\u05d1."); })
+      .finally(function() { setBusy(false); });
+  }
+  useEffect(function() { fetchRec(); }, []);
+  return h("div", { dir: "rtl" },
+    h(MHead, { title: "\u2728 \u05d4\u05de\u05dc\u05e6\u05ea \u05d0\u05e8\u05d5\u05d7\u05d4", onClose: props.onClose }),
+    h("div", { style: { fontSize: 13, color: "rgba(255,255,255,0.35)", marginBottom: 16 } },
+      "\u05e0\u05d5\u05ea\u05e8\u05d5 ", h("span", { style: { color: "#818cf8", fontWeight: 700 } }, (remaining || 0).toLocaleString()), " \u05e7\u05e7\u05f4\u05dc \u05dc\u05e4\u05d9 \u05d4\u05d9\u05e2\u05d3 \u05e9\u05dc\u05da"),
+    busy ? h("div", { style: { textAlign: "center", padding: "32px 0" } },
+      h(IconLoader, { size: 36, color: "#818cf8", style: { display: "block", margin: "0 auto" } }),
+      h("p", { style: { color: "rgba(255,255,255,0.3)", fontSize: 13, marginTop: 12 } }, "\u05de\u05d7\u05e9\u05d1 \u05d4\u05de\u05dc\u05e6\u05d5\u05ea \u05d0\u05d9\u05e9\u05d9\u05d5\u05ea...")) : null,
+    err ? h("p", { style: { color: "#f43f5e", textAlign: "center", fontSize: 13 } }, err) : null,
+    !busy ? items.map(function(s, i) {
+      var isAdded = added.indexOf(i) !== -1;
+      return h("div", { key: i, style: { background: CARD, border: "1px solid " + BORD, borderRadius: 16, padding: 14, marginBottom: 12 } },
+        h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 } },
+          h("div", { style: { flex: 1 } },
+            h("div", { style: { fontSize: 15, fontWeight: 700, color: "#fff" } }, s.meal_name),
+            s.why ? h("div", { style: { fontSize: 12, color: "rgba(255,255,255,0.35)", marginTop: 3 } }, s.why) : null),
+          h("span", { style: { fontSize: 18, fontWeight: 900, color: "#818cf8", marginRight: 10 } }, s.calories)),
+        h("div", { style: { display: "flex", gap: 12, fontSize: 11, color: "rgba(255,255,255,0.3)", marginBottom: 10 } },
+          h("span", null, "\u05d7\u05dc\u05f3 " + s.protein + "g"), h("span", null, "\u05e4\u05d7\u05f3 " + s.carbs + "g"), h("span", null, "\u05e9\u05d5\u05de\u05df " + s.fat + "g")),
+        h("button", { onClick: function() { if (!isAdded) { props.onAdd(s).then(function() { setAdded(function(a) { return a.concat([i]); }); }); } }, disabled: isAdded,
+          style: { width: "100%", background: isAdded ? "rgba(16,185,129,0.15)" : "rgba(99,102,241,0.2)", border: "1px solid " + (isAdded ? "rgba(16,185,129,0.3)" : "rgba(99,102,241,0.3)"), borderRadius: 10, padding: "10px 0", fontSize: 13, fontWeight: 700, color: isAdded ? "#10b981" : "#818cf8", cursor: isAdded ? "default" : "pointer" } },
+          isAdded ? "\u2705 \u05e0\u05d5\u05e1\u05e3 \u05dc\u05d9\u05d5\u05de\u05df" : "\u05d4\u05d5\u05e1\u05e3 \u05dc\u05d9\u05d5\u05de\u05df"));
+    }) : null,
+    !busy && items.length > 0 ? h("button", { onClick: fetchRec, style: { width: "100%", background: "none", border: "none", color: "rgba(255,255,255,0.25)", fontSize: 13, cursor: "pointer", padding: "8px 0" } }, "\u{1f504} \u05d4\u05de\u05dc\u05e6\u05d5\u05ea \u05d0\u05d7\u05e8\u05d5\u05ea") : null);
+}
+
+// ── Main App ──────────────────────────────────────────────────────────────────
+function CalTrack() {
+  var s1 = useState(""); var sbUrl = s1[0], setSbUrl = s1[1];
+  var s2 = useState(""); var sbKey = s2[0], setSbKey = s2[1];
+  var s3 = useState(null); var sb = s3[0], setSb = s3[1];
+  var s4 = useState("today"); var screen = s4[0], setScreen = s4[1];
+  var s5 = useState({ tdee: 2000, goal_deficit: 500 }); var settings = s5[0], setSettings = s5[1];
+  var s6 = useState(null); var garmin = s6[0], setGarmin = s6[1];
+  var s7 = useState([]); var meals = s7[0], setMeals = s7[1];
+  var s8 = useState([]); var burns = s8[0], setBurns = s8[1];
+  var s9 = useState([]); var saved = s9[0], setSaved = s9[1];
+  var s10 = useState([]); var hist = s10[0], setHist = s10[1];
+  var s11 = useState(null); var histDay = s11[0], setHistDay = s11[1];
+  var s12 = useState(false); var busy = s12[0], setBusy = s12[1];
+  var s13 = useState(null); var modal = s13[0], setModal = s13[1];
+  var s14 = useState(null); var editTarget = s14[0], setEditTarget = s14[1];
+
+  function closeModal() { setModal(null); setEditTarget(null); }
+  function connect() {
+    var u = sbUrl.trim(), k = sbKey.trim();
+    if (!u || !k) return;
+    var client = makeSB(u, k);
+    setSb(function() { return client; });
+  }
+
+  var loadSettings = useCallback(function() {
+    if (!sb) return Promise.resolve();
+    return sb("user_settings", "GET", null, "?id=eq.1&limit=1").then(function(d) {
+      if (d && d[0]) setSettings({ tdee: d[0].tdee, goal_deficit: d[0].goal_deficit });
+    }).catch(function() {});
+  }, [sb]);
+
+  var loadToday = useCallback(function() {
+    if (!sb) return Promise.resolve();
+    setBusy(true);
+    return Promise.all([
+      sb("garmin_daily", "GET", null, "?date=eq." + TODAY + "&limit=1"),
+      sb("meal_logs", "GET", null, "?date=eq." + TODAY + "&order=created_at.asc"),
+      sb("manual_burns", "GET", null, "?date=eq." + TODAY + "&order=created_at.asc")
+    ]).then(function(results) {
+      setGarmin(results[0] && results[0][0] ? results[0][0] : null);
+      setMeals(results[1] || []);
+      setBurns(results[2] || []);
+    }).catch(function(e) { console.error(e); }).finally(function() { setBusy(false); });
+  }, [sb]);
+
+  var loadSaved = useCallback(function() {
+    if (!sb) return Promise.resolve();
+    return sb("saved_meals", "GET", null, "?order=name.asc").then(function(d) { setSaved(d || []); }).catch(function() {});
+  }, [sb]);
+
+  var loadHist = useCallback(function() {
+    if (!sb) return Promise.resolve();
+    var from = new Date(); from.setDate(from.getDate() - 30);
+    var f = from.toISOString().split("T")[0];
+    return Promise.all([
+      sb("meal_logs", "GET", null, "?date=gte." + f + "&date=lt." + TODAY + "&order=date.asc"),
+      sb("manual_burns", "GET", null, "?date=gte." + f + "&date=lt." + TODAY + "&order=date.asc"),
+      sb("garmin_daily", "GET", null, "?date=gte." + f + "&date=lt." + TODAY + "&order=date.asc")
+    ]).then(function(results) {
+      var ml = results[0] || [], bl = results[1] || [], gl = results[2] || [];
+      var map = {};
+      function ensure(d) { if (!map[d]) map[d] = { date: d, eaten: 0, burned: 0, p: 0, c: 0, f: 0 }; }
+      ml.forEach(function(m) { ensure(m.date); map[m.date].eaten += m.calories || 0; map[m.date].p += m.protein || 0; map[m.date].c += m.carbs || 0; map[m.date].f += m.fat || 0; });
+      bl.forEach(function(b) { ensure(b.date); map[b.date].burned += b.calories || 0; });
+      gl.forEach(function(g) { ensure(g.date); map[g.date].burned += g.calories_active || 0; });
+      var sorted = Object.values(map).sort(function(a, b) { return a.date.localeCompare(b.date); });
+      sorted.forEach(function(d) { d.balance = d.eaten - d.burned; });
+      setHist(sorted);
+      if (sorted.length > 0 && !histDay) setHistDay(sorted[sorted.length - 1].date);
+    }).catch(function(e) { console.error(e); });
+  }, [sb, histDay]);
+
+  useEffect(function() {
+    if (!sb) return;
+    loadSettings();
+    if (screen === "today") { loadToday(); loadSaved(); }
+    if (screen === "history") loadHist();
+    if (screen === "saved") loadSaved();
+  }, [screen, sb]);
+
+  var targetCal = settings.tdee - settings.goal_deficit;
+  var totalEaten = meals.reduce(function(s, m) { return s + (m.calories || 0); }, 0);
+  var garminBurned = garmin && garmin.calories_active ? garmin.calories_active : 0;
+  var manualBurned = burns.reduce(function(s, b) { return s + (b.calories || 0); }, 0);
+  var projectedBurn = settings.tdee + garminBurned + manualBurned;
+  var remaining = targetCal - totalEaten;
+  var projDeficit = projectedBurn - totalEaten;
+  var todayP = meals.reduce(function(s, m) { return s + (m.protein || 0); }, 0);
+  var todayC = meals.reduce(function(s, m) { return s + (m.carbs || 0); }, 0);
+  var todayF = meals.reduce(function(s, m) { return s + (m.fat || 0); }, 0);
+  var histIdx = hist.findIndex(function(hh) { return hh.date === histDay; });
+  var hd = hist[histIdx] || { eaten: 0, burned: 0, balance: 0, p: 0, c: 0, f: 0 };
+
+  function addMeal(meal, saveAsM) {
+    return sb("meal_logs", "POST", { date: TODAY, meal_name: meal.meal_name, calories: +meal.calories, protein: +meal.protein, carbs: +meal.carbs, fat: +meal.fat })
+      .then(function() { if (saveAsM) return sb("saved_meals", "POST", { name: meal.meal_name, calories: +meal.calories, protein: +meal.protein, carbs: +meal.carbs, fat: +meal.fat }); })
+      .then(function() { closeModal(); return loadToday(); });
+  }
+  function updateMeal(id, data) {
+    return sb("meal_logs", "PATCH", { meal_name: data.meal_name, calories: +data.calories, protein: +data.protein, carbs: +data.carbs, fat: +data.fat }, "?id=eq." + id)
+      .then(function() { closeModal(); return loadToday(); });
+  }
+  function deleteMeal(id) { return sb("meal_logs", "DELETE", null, "?id=eq." + id).then(loadToday); }
+  function addBurn(b) {
+    return sb("manual_burns", "POST", { date: TODAY, activity: b.activity, calories: +b.calories })
+      .then(function() { closeModal(); return loadToday(); });
+  }
+  function updateBurn(id, data) {
+    return sb("manual_burns", "PATCH", { activity: data.activity, calories: +data.calories }, "?id=eq." + id)
+      .then(function() { closeModal(); return loadToday(); });
+  }
+  function deleteBurn(id) { return sb("manual_burns", "DELETE", null, "?id=eq." + id).then(loadToday); }
+  function addSaved(m) { return sb("saved_meals", "POST", m).then(function() { closeModal(); return loadSaved(); }); }
+  function deleteSaved(id) { return sb("saved_meals", "DELETE", null, "?id=eq." + id).then(loadSaved); }
+  function saveSettings(s) {
+    return sb("user_settings", "POST", Object.assign({ id: 1 }, s), "", true).then(function() { setSettings(s); }).catch(function() {});
+  }
+
+  // Login
+  if (!sb) return h("div", { dir: "rtl", style: { minHeight: "100vh", background: BG, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 } },
+    h("div", { style: { width: "100%", maxWidth: 360 } },
+      h("div", { style: { textAlign: "center", marginBottom: 32 } },
+        h("div", { style: { fontSize: 52, marginBottom: 8 } }, "\u{1f525}"),
+        h("h1", { style: { fontSize: 32, fontWeight: 900, color: "#fff", margin: 0, letterSpacing: -1 } }, "CalTrack"),
+        h("p", { style: { color: "rgba(255,255,255,0.3)", fontSize: 13, marginTop: 6 } }, "Garmin \u00b7 AI \u00b7 \u05d2\u05e8\u05e2\u05d5\u05df \u05e7\u05dc\u05d5\u05e8\u05d9")),
+      h(GlassCard, null,
+        h(FInput, { label: "Supabase Project URL", value: sbUrl, onChange: setSbUrl, placeholder: "https://xxx.supabase.co" }),
+        h(FInput, { label: "API Key (service_role)", type: "password", value: sbKey, onChange: setSbKey, placeholder: "eyJ..." }),
+        h(GradBtn, { onClick: connect }, "\u05d4\u05ea\u05d7\u05d1\u05e8"))));
+
+  // Today screen
+  function TodayScreen() {
+    return h("div", { style: { display: "flex", flexDirection: "column", gap: 16 } },
+      // Header
+      h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start" } },
+        h("div", null,
+          h("h1", { style: { fontSize: 28, fontWeight: 900, margin: 0, letterSpacing: -1 } }, "\u05d4\u05d9\u05d5\u05dd"),
+          h("p", { style: { fontSize: 12, color: "rgba(255,255,255,0.3)", margin: "4px 0 0" } }, new Date().toLocaleDateString("he-IL", { weekday: "long", day: "numeric", month: "long" }))),
+        h("button", { onClick: loadToday, style: { background: "rgba(255,255,255,0.06)", border: "1px solid " + BORD, borderRadius: 12, width: 40, height: 40, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "rgba(255,255,255,0.4)" } },
+          busy ? h(IconLoader, { size: 16 }) : h(IconRefresh, { size: 16 }))),
+      // Ring
+      h("div", { style: { display: "flex", flexDirection: "column", alignItems: "center" } },
+        h(Ring, { eaten: totalEaten, target: targetCal }),
+        h("div", { style: { display: "flex", gap: 10, width: "100%", marginTop: 14 } },
+          h(StatChip, { label: "\u05d0\u05db\u05dc\u05ea\u05d9 \u05e7\u05e7\u05f4\u05dc", val: totalEaten }),
+          h(StatChip, { label: "\u05d9\u05e2\u05d3 \u05e7\u05e7\u05f4\u05dc", val: targetCal, color: "#818cf8" }),
+          h(StatChip, { label: "\u05e9\u05e8\u05d9\u05e4\u05d4 \u05e6\u05e4\u05d5\u05d9\u05d4", val: projectedBurn, color: "#fb923c" }))),
+      // Forecast
+      h(GlassCard, null,
+        h("div", { style: { fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.3)", letterSpacing: 1, textTransform: "uppercase", marginBottom: 10 } }, "\u{1f4ca} \u05ea\u05d7\u05d6\u05d9\u05ea \u05dc\u05e1\u05d5\u05e3 \u05d4\u05d9\u05d5\u05dd"),
+        h(FRow, { label: "\u05e9\u05e8\u05d9\u05e4\u05d4 \u05e6\u05e4\u05d5\u05d9\u05d4 (TDEE + \u05e4\u05e2\u05d9\u05dc\u05d5\u05ea)", val: projectedBurn, color: "#fb923c" }),
+        h(FRow, { label: "\u05e0\u05d0\u05db\u05dc \u05e2\u05d3 \u05db\u05d4", val: totalEaten }),
+        h("div", { style: { borderTop: "1px solid " + BORD, marginTop: 8, paddingTop: 8 } },
+          h(FRow, { label: "\u05d2\u05e8\u05e2\u05d5\u05df/\u05e2\u05d5\u05d3\u05e3 \u05e6\u05e4\u05d5\u05d9", val: Math.abs(projDeficit), color: projDeficit > 0 ? "#34d399" : "#f43f5e", abs: true }),
+          h(FRow, { label: "\u05e0\u05d5\u05ea\u05e8 \u05dc\u05d0\u05db\u05d9\u05dc\u05d4 \u05dc\u05e4\u05d9 \u05d9\u05e2\u05d3", val: Math.max(remaining, 0), color: "#818cf8" }))),
+      // Garmin
+      h("div", { style: { background: "rgba(255,255,255,0.03)", border: "1px solid " + BORD, borderRadius: 16, padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" } },
+        h("span", { style: { fontSize: 13, color: "rgba(255,255,255,0.3)" } }, "\u231a \u05d2\u05e8\u05de\u05d9\u05df"),
+        garmin ? h("div", { style: { display: "flex", gap: 16, fontSize: 12, color: "rgba(255,255,255,0.5)" } },
+          h("span", null, "\u{1f6b6} " + (garmin.steps || 0).toLocaleString()),
+          h("span", null, "\u{1f525} " + (garmin.calories_active || "\u2014")),
+          h("span", null, "\u{1f634} " + (garmin.sleep_seconds ? (garmin.sleep_seconds / 3600).toFixed(1) + "\u05e9\u05f3" : "\u2014")))
+        : h("span", { style: { fontSize: 12, color: "rgba(255,255,255,0.15)" } }, "\u05d8\u05e8\u05dd \u05e2\u05d5\u05d3\u05db\u05df")),
+      // Macros
+      (todayP + todayC + todayF) > 0 ? h(GlassCard, { style: { display: "flex", alignItems: "center", gap: 16 } },
+        h(DonutChart, { p: todayP, c: todayC, f: todayF, size: 68, ir: 18, or2: 32 }),
+        h("div", { style: { flex: 1, display: "flex", flexDirection: "column", gap: 6 } },
+          h(MLRow, { c: "#60a5fa", l: "\u05d7\u05dc\u05d1\u05d5\u05df", g: todayP }),
+          h(MLRow, { c: "#fbbf24", l: "\u05e4\u05d7\u05de\u05d9\u05de\u05d5\u05ea", g: todayC }),
+          h(MLRow, { c: "#f472b6", l: "\u05e9\u05d5\u05de\u05df", g: todayF }))) : null,
+      // AI button
+      h("button", { onClick: function() { setModal("recommend"); },
+        style: { width: "100%", background: "linear-gradient(135deg,#6d28d9,#7c3aed,#a21caf)", border: "none", borderRadius: 18, padding: "16px 0", fontSize: 15, fontWeight: 800, color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, letterSpacing: 0.3 } },
+        h(IconSpark, { size: 18 }), "\u05d4\u05de\u05dc\u05e6\u05ea \u05d0\u05e8\u05d5\u05d7\u05d4 \u05dc\u05e4\u05d9 \u05d4\u05d9\u05ea\u05e8\u05d4 \u05e9\u05dc\u05d9"),
+      // Meals
+      h("div", null,
+        h(SecHdr, { title: "\u05d0\u05e8\u05d5\u05d7\u05d5\u05ea", onAdd: function() { setModal("food"); }, addColor: "#4f46e5" }),
+        h("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
+          meals.length === 0 ? h(Empty, { text: "\u05dc\u05d0 \u05d4\u05d5\u05d6\u05e0\u05d5 \u05d0\u05e8\u05d5\u05d7\u05d5\u05ea \u05e2\u05d3\u05d9\u05d9\u05df" }) :
+          h(React.Fragment, null,
+            meals.map(function(m) {
+              return h(EntryRow, { key: m.id, title: m.meal_name,
+                sub: m.protein ? ("\u05d7\u05dc\u05f3 " + Math.round(m.protein) + "g \u00b7 \u05e4\u05d7\u05f3 " + Math.round(m.carbs) + "g \u00b7 \u05e9\u05d5\u05de\u05df " + Math.round(m.fat) + "g") : "",
+                val: m.calories + " \u05e7\u05e7\u05f4\u05dc",
+                onEdit: function() { setEditTarget({ type: "meal", item: m }); setModal("edit"); },
+                onDel: function() { deleteMeal(m.id); } });
+            }),
+            h("div", { style: { fontSize: 12, color: "rgba(255,255,255,0.25)", textAlign: "left", paddingRight: 4 } },
+              "\u05e1\u05d4\u05f4\u05db: ", h("span", { style: { color: "rgba(255,255,255,0.6)", fontWeight: 700 } }, totalEaten.toLocaleString()), " \u05e7\u05e7\u05f4\u05dc")))),
+      // Burns
+      h("div", null,
+        h(SecHdr, { title: "\u05e9\u05e8\u05d9\u05e4\u05d5\u05ea", onAdd: function() { setModal("burn"); }, addColor: "#ea580c" }),
+        h("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
+          garmin ? h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", background: "rgba(255,255,255,0.03)", border: "1px solid " + BORD, borderRadius: 14, padding: "11px 14px" } },
+            h("span", { style: { fontSize: 13, color: "rgba(255,255,255,0.3)" } }, "\u231a \u05d2\u05e8\u05de\u05d9\u05df \u05d0\u05d5\u05d8\u05d5\u05de\u05d8\u05d9"),
+            h("span", { style: { fontWeight: 700, color: "#fb923c" } }, garminBurned + " \u05e7\u05e7\u05f4\u05dc")) : null,
+          burns.map(function(b) {
+            return h(EntryRow, { key: b.id, title: b.activity, val: b.calories + " \u05e7\u05e7\u05f4\u05dc", valColor: "#fb923c",
+              onEdit: function() { setEditTarget({ type: "burn", item: b }); setModal("edit"); },
+              onDel: function() { deleteBurn(b.id); } });
+          }),
+          !garmin && burns.length === 0 ? h(Empty, { text: "\u05d0\u05d9\u05df \u05e9\u05e8\u05d9\u05e4\u05d5\u05ea \u05d9\u05d3\u05e0\u05d9\u05d5\u05ea" }) : null)));
+  }
+
+  // History screen
+  function HistoryScreen() {
+    return h("div", { style: { display: "flex", flexDirection: "column", gap: 16 } },
+      h("h1", { style: { fontSize: 28, fontWeight: 900, margin: 0, letterSpacing: -1 } }, "\u05d4\u05d9\u05e1\u05d8\u05d5\u05e8\u05d9\u05d4"),
+      h(GlassCard, null,
+        h("div", { style: { fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.3)", letterSpacing: 1, textTransform: "uppercase", marginBottom: 12 } }, "30 \u05d9\u05de\u05d9\u05dd \u2014 \u05d2\u05e8\u05e2\u05d5\u05df / \u05e2\u05d5\u05d3\u05e3"),
+        h(BarChart, { data: hist })),
+      histDay ? h(GlassCard, null,
+        h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 } },
+          h("button", { onClick: function() { if (histIdx > 0) setHistDay(hist[histIdx - 1].date); }, disabled: histIdx <= 0,
+            style: { background: "none", border: "none", color: histIdx <= 0 ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.5)", cursor: histIdx <= 0 ? "default" : "pointer" } }, h(IconChevR, { size: 24 })),
+          h("div", { style: { textAlign: "center" } },
+            h("div", { style: { fontWeight: 700, fontSize: 16 } }, fmtDate(histDay)),
+            h("div", { style: { fontSize: 13, fontWeight: 800, marginTop: 2, color: hd.balance <= 0 ? "#34d399" : "#f43f5e" } },
+              (hd.balance <= 0 ? "\u{1f3af} \u05d2\u05e8\u05e2\u05d5\u05df " + Math.abs(hd.balance) : "\u26a0\ufe0f \u05e2\u05d5\u05d3\u05e3 " + hd.balance) + " \u05e7\u05e7\u05f4\u05dc")),
+          h("button", { onClick: function() { if (histIdx < hist.length - 1) setHistDay(hist[histIdx + 1].date); }, disabled: histIdx >= hist.length - 1,
+            style: { background: "none", border: "none", color: histIdx >= hist.length - 1 ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.5)", cursor: histIdx >= hist.length - 1 ? "default" : "pointer" } }, h(IconChevL, { size: 24 }))),
+        h("div", { style: { display: "flex", gap: 16, alignItems: "center" } },
+          (hd.p + hd.c + hd.f) > 0 ? h(DonutChart, { p: hd.p, c: hd.c, f: hd.f, size: 120, ir: 34, or2: 54 })
+          : h("div", { style: { width: 120, height: 120, display: "flex", alignItems: "center", justifyContent: "center", color: "rgba(255,255,255,0.1)", fontSize: 12 } }, "\u05d0\u05d9\u05df \u05de\u05d0\u05e7\u05e8\u05d5"),
+          h("div", { style: { flex: 1, display: "flex", flexDirection: "column", gap: 6 } },
+            h(MLRow, { c: "#60a5fa", l: "\u05d7\u05dc\u05d1\u05d5\u05df", g: hd.p }),
+            h(MLRow, { c: "#fbbf24", l: "\u05e4\u05d7\u05de\u05d9\u05de\u05d5\u05ea", g: hd.c }),
+            h(MLRow, { c: "#f472b6", l: "\u05e9\u05d5\u05de\u05df", g: hd.f }),
+            h("div", { style: { borderTop: "1px solid " + BORD, paddingTop: 8, marginTop: 4, display: "flex", flexDirection: "column", gap: 4 } },
+              h("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 12 } },
+                h("span", { style: { color: "rgba(255,255,255,0.3)" } }, "\u05d0\u05db\u05dc\u05ea\u05d9"),
+                h("span", { style: { color: "rgba(255,255,255,0.7)", fontWeight: 700 } }, hd.eaten)),
+              h("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 12 } },
+                h("span", { style: { color: "rgba(255,255,255,0.3)" } }, "\u05e9\u05e8\u05e4\u05ea\u05d9"),
+                h("span", { style: { color: "#fb923c", fontWeight: 700 } }, hd.burned)))))) : null);
+  }
+
+  // Saved screen
+  function SavedScreen() {
+    return h("div", { style: { display: "flex", flexDirection: "column", gap: 16 } },
+      h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+        h("h1", { style: { fontSize: 28, fontWeight: 900, margin: 0, letterSpacing: -1 } }, "\u05de\u05e0\u05d5\u05ea \u05e9\u05de\u05d5\u05e8\u05d5\u05ea"),
+        h("button", { onClick: function() { setModal("addsaved"); }, style: { background: "#4f46e5", border: "none", borderRadius: "50%", width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff" } }, h(IconPlus, { size: 18 }))),
+      h("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
+        saved.length === 0 ? h("div", { style: { textAlign: "center", color: "rgba(255,255,255,0.15)", padding: "48px 0" } }, "\u05d0\u05d9\u05df \u05de\u05e0\u05d5\u05ea \u05e9\u05de\u05d5\u05e8\u05d5\u05ea \u05e2\u05d3\u05d9\u05d9\u05df") :
+        saved.map(function(m) {
+          return h(EntryRow, { key: m.id, title: m.name,
+            sub: m.protein ? ("\u05d7\u05dc\u05f3 " + Math.round(m.protein) + "g \u00b7 \u05e4\u05d7\u05f3 " + Math.round(m.carbs) + "g \u00b7 \u05e9\u05d5\u05de\u05df " + Math.round(m.fat) + "g") : "",
+            val: m.calories + " \u05e7\u05e7\u05f4\u05dc",
+            onDel: function() { deleteSaved(m.id); } });
+        })));
+  }
+
+  return h("div", { dir: "rtl", style: { minHeight: "100vh", background: BG, color: "#fff" } },
+    h("div", { style: { maxWidth: 520, margin: "0 auto", padding: "16px 16px 96px" } },
+      screen === "today" ? h(TodayScreen, null) : null,
+      screen === "history" ? h(HistoryScreen, null) : null,
+      screen === "saved" ? h(SavedScreen, null) : null,
+      screen === "settings" ? h(SettingsScreen, { settings: settings, onSave: saveSettings }) : null),
+    h(BottomNav, { screen: screen, setScreen: setScreen }),
+    modal ? h("div", { style: { position: "fixed", inset: 0, zIndex: 50, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "flex-end", justifyContent: "center" }, onClick: closeModal },
+      h("div", { style: { width: "100%", maxWidth: 520, background: "#0d1117", borderTop: "1px solid " + BORD, borderRadius: "24px 24px 0 0", padding: "20px 20px 40px", maxHeight: "88vh", overflowY: "auto" }, onClick: function(e) { e.stopPropagation(); } },
+        modal === "food" ? h(FoodModal, { saved: saved, onAdd: addMeal, onClose: closeModal }) : null,
+        modal === "burn" ? h(BurnModal, { onAdd: addBurn, onClose: closeModal }) : null,
+        modal === "addsaved" ? h(AddSavedModal, { onAdd: addSaved, onClose: closeModal }) : null,
+        modal === "edit" && editTarget ? h(EditModal, { type: editTarget.type, item: editTarget.item, onSave: editTarget.type === "meal" ? updateMeal : updateBurn, onClose: closeModal }) : null,
+        modal === "recommend" ? h(RecommendModal, { remaining: remaining, protein: todayP, carbs: todayC, fat: todayF, onAdd: function(m) { return addMeal(m, false); }, onClose: closeModal }) : null)) : null);
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(CalTrack));
+</script>
+</body>
+</html>
