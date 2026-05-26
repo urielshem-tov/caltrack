@@ -51,7 +51,7 @@ function analyzeFood(desc, img64) {
   if (img64) content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: img64 } });
   var ctx = img64 ? ("Look at this food image" + (desc ? ' and description: "' + desc + '"' : "") + ".") : ('Food: "' + desc + '"');
   content.push({ type: "text", text: ctx + "\nReturn ONLY valid JSON: {\"meal_name\":\"\u05e9\u05dd \u05d1\u05e2\u05d1\u05e8\u05d9\u05ea\",\"calories\":0,\"protein\":0,\"carbs\":0,\"fat\":0}" });
-  return fetch("/api/claude", {
+  return fetch("/.netlify/functions/claude", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 500, messages: [{ role: "user", content: content }] })
   }).then(function(r) { return r.json(); }).then(function(d) {
@@ -64,7 +64,7 @@ function getRecommendations(remaining, p, c, f) {
   var hr = new Date().getHours();
   var mealType = hr < 11 ? "\u05d0\u05e8\u05d5\u05d7\u05ea \u05d1\u05d5\u05e7\u05e8" : hr < 15 ? "\u05d0\u05e8\u05d5\u05d7\u05ea \u05e6\u05d4\u05e8\u05d9\u05d9\u05dd" : hr < 19 ? "\u05d7\u05d8\u05d9\u05e3 / \u05d0\u05e8\u05d5\u05d7\u05ea \u05d1\u05d9\u05e0\u05d9\u05d9\u05dd" : "\u05d0\u05e8\u05d5\u05d7\u05ea \u05e2\u05e8\u05d1";
   var prompt = "\u05d0\u05ea\u05d4 \u05ea\u05d6\u05d5\u05e0\u05d0\u05d9. \u05d9\u05e9 \u05dc\u05d9 " + remaining + " \u05e7\u05e7\"\u05dc \u05e0\u05d5\u05ea\u05e8\u05d5\u05ea \u05dc\u05d4\u05d9\u05d5\u05dd (" + mealType + "). \u05d0\u05db\u05dc\u05ea\u05d9: \u05d7\u05dc\u05d1\u05d5\u05df " + Math.round(p) + "g, \u05e4\u05d7\u05de\u05d9\u05de\u05d5\u05ea " + Math.round(c) + "g, \u05e9\u05d5\u05de\u05df " + Math.round(f) + "g. \u05d4\u05e6\u05e2 3 \u05d0\u05e8\u05d5\u05d7\u05d5\u05ea \u05de\u05ea\u05d0\u05d9\u05de\u05d5\u05ea. \u05d4\u05d7\u05d6\u05e8 JSON \u05d1\u05dc\u05d1\u05d3:\n[{\"meal_name\":\"\u05e9\u05dd\",\"calories\":0,\"protein\":0,\"carbs\":0,\"fat\":0,\"why\":\"\u05e1\u05d9\u05d1\u05d4 \u05e7\u05e6\u05e8\u05d4\"}]";
-  return fetch("/api/claude", {
+  return fetch("/.netlify/functions/claude", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 800, messages: [{ role: "user", content: prompt }] })
   }).then(function(r) { return r.json(); }).then(function(d) {
