@@ -55,7 +55,10 @@ function analyzeFood(desc, img64) {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 500, messages: [{ role: "user", content: content }] })
   }).then(function(r) { return r.json(); }).then(function(d) {
-    var text = (d.content && d.content[0] && d.content[0].text) ? d.content[0].text : "{}";
+    if (!d.content || !d.content[0] || !d.content[0].text) {
+      throw new Error((d.error && d.error.message) ? d.error.message : JSON.stringify(d).slice(0, 300));
+    }
+    var text = d.content[0].text;
     return JSON.parse(text.replace(/```[a-z]*/g, "").replace(/```/g, "").trim());
   });
 }
@@ -68,7 +71,10 @@ function getRecommendations(remaining, p, c, f) {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 800, messages: [{ role: "user", content: prompt }] })
   }).then(function(r) { return r.json(); }).then(function(d) {
-    var text = (d.content && d.content[0] && d.content[0].text) ? d.content[0].text : "[]";
+    if (!d.content || !d.content[0] || !d.content[0].text) {
+      throw new Error((d.error && d.error.message) ? d.error.message : JSON.stringify(d).slice(0, 300));
+    }
+    var text = d.content[0].text;
     return JSON.parse(text.replace(/```[a-z]*/g, "").replace(/```/g, "").trim());
   });
 }
@@ -76,7 +82,22 @@ function getRecommendations(remaining, p, c, f) {
 function fileToB64(file) {
   return new Promise(function(res, rej) {
     var r = new FileReader();
-    r.onload = function() { res(r.result.split(",")[1]); };
+    r.onload = function() {
+      var img = new Image();
+      img.onload = function() {
+        var max = 1024;
+        var w = img.width, hgt = img.height;
+        if (w > hgt && w > max) { hgt = Math.round(hgt * max / w); w = max; }
+        else if (hgt >= w && hgt > max) { w = Math.round(w * max / hgt); hgt = max; }
+        var canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = hgt;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, hgt);
+        var dataUrl = canvas.toDataURL("image/jpeg", 0.75);
+        res(dataUrl.split(",")[1]);
+      };
+      img.onerror = rej;
+      img.src = r.result;
+    };
     r.onerror = rej;
     r.readAsDataURL(file);
   });
@@ -301,7 +322,7 @@ function FoodModal(props) {
     setBusy(true); setErr(""); setResult(null);
     analyzeFood(text, img64).then(function(r) {
       setResult({ meal_name: r.meal_name || "", calories: r.calories || 0, protein: r.protein || 0, carbs: r.carbs || 0, fat: r.fat || 0 });
-    }).catch(function() { setErr("\u05e9\u05d2\u05d9\u05d0\u05d4 \u05d1\u05e0\u05d9\u05ea\u05d5\u05d7. \u05e0\u05e1\u05d4 \u05e9\u05d5\u05d1."); }).finally(function() { setBusy(false); });
+    }).catch(function(e) { setErr("\u05e9\u05d2\u05d9\u05d0\u05d4: " + ((e && e.message) ? e.message : "\u05e0\u05e1\u05d4 \u05e9\u05d5\u05d1")); }).finally(function() { setBusy(false); });
   }
   function handleAdd() {
     if (!result) return;
@@ -413,7 +434,7 @@ function RecommendModal(props) {
     setBusy(true); setErr(""); setItems([]);
     getRecommendations(remaining, protein, carbs, fat)
       .then(function(data) { setItems(data); })
-      .catch(function() { setErr("\u05e9\u05d2\u05d9\u05d0\u05d4. \u05e0\u05e1\u05d4 \u05e9\u05d5\u05d1."); })
+      .catch(function(e) { setErr("\u05e9\u05d2\u05d9\u05d0\u05d4: " + ((e && e.message) ? e.message : "\u05e0\u05e1\u05d4 \u05e9\u05d5\u05d1")); })
       .finally(function() { setBusy(false); });
   }
   useEffect(function() { fetchRec(); }, []);
