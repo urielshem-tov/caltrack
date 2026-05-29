@@ -2,16 +2,20 @@
 <html lang="he" dir="rtl">
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
 <title>CalTrack</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:#07090f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#fff;direction:rtl}
+html,body{width:100%;min-height:100%;overflow-x:hidden}
+body{background:#07090f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#fff;direction:rtl;-webkit-text-size-adjust:100%;touch-action:manipulation;padding:0;overscroll-behavior-y:none}
 @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 .spin{animation:spin 1s linear infinite}
-input,textarea,button{font-family:inherit}
+input,textarea,button{font-family:inherit;font-size:16px}
+button{min-height:44px;-webkit-tap-highlight-color:transparent}
+.app-shell{max-width:520px;margin:0 auto;padding:16px 16px calc(112px + env(safe-area-inset-bottom));width:100%}
+@media(max-width:430px){.app-shell{padding:12px 12px calc(108px + env(safe-area-inset-bottom))}h1{font-size:24px!important}.mobile-tight{gap:10px!important}.mobile-card{border-radius:16px!important;padding:14px!important}}
 input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 ::-webkit-scrollbar{width:4px}
 ::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:2px}
@@ -146,7 +150,7 @@ function DonutChart(props) {
 // ── Bar Chart (pure SVG) ──────────────────────────────────────────────────────
 function BarChart(props) {
   var data = props.data;
-  var W = 340, H = 160, PB = 24, PT = 8, PL = 4, PR = 4;
+  var W = 320, H = 160, PB = 24, PT = 8, PL = 4, PR = 4;
   var cW = W - PL - PR, cH = H - PB - PT;
   if (!data || !data.length) return h("div", { style: { textAlign: "center", color: "rgba(255,255,255,0.15)", padding: "40px 0", fontSize: 13 } }, "\u05d0\u05d9\u05df \u05e0\u05ea\u05d5\u05e0\u05d9\u05dd \u05e2\u05d3\u05d9\u05d9\u05df");
   var vals = data.map(function(d) { return d.balance; });
@@ -166,7 +170,7 @@ function BarChart(props) {
     var x = PL + (cW / data.length) * i + (cW / data.length) / 2;
     labels.push(h("text", { key: i, x: x, y: H - 6, textAnchor: "middle", fill: "#475569", fontSize: 9 }, fmtDate(d.date)));
   });
-  return h("svg", { width: "100%", viewBox: "0 0 " + W + " " + H, style: { overflow: "visible" } },
+  return h("svg", { width: "100%", viewBox: "0 0 " + W + " " + H, preserveAspectRatio: "none", style: { overflow: "hidden", maxWidth: "100%" } },
     h("line", { x1: PL, y1: zero, x2: W - PR, y2: zero, stroke: "rgba(255,255,255,0.08)", strokeWidth: 1 }),
     bars, labels);
 }
@@ -174,7 +178,8 @@ function BarChart(props) {
 // ── Ring ──────────────────────────────────────────────────────────────────────
 function Ring(props) {
   var eaten = props.eaten, target = props.target;
-  var S = 210, sw = 20, r = (S - sw) / 2, circ = 2 * Math.PI * r;
+  var vw = (typeof window !== "undefined" && window.innerWidth) ? window.innerWidth : 390;
+  var S = Math.round(Math.min(210, Math.max(166, vw * 0.52))), sw = S < 180 ? 16 : 20, r = (S - sw) / 2, circ = 2 * Math.PI * r;
   var pct = Math.min(Math.max(eaten / (target || 1), 0), 1);
   var over = eaten > target;
   var remaining = target - eaten;
@@ -191,7 +196,7 @@ function Ring(props) {
         strokeDasharray: (pct * circ) + " " + circ, style: { transition: "stroke-dasharray 0.6s cubic-bezier(.4,0,.2,1)" } })),
     h("div", { style: { position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center" } },
       h("div", { style: { fontSize: 13, color: "rgba(255,255,255,0.3)", letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 } }, over ? "\u26a0\ufe0f \u05e2\u05d5\u05d3\u05e3" : "\u05e0\u05d5\u05ea\u05e8"),
-      h("div", { style: { fontSize: 44, fontWeight: 900, color: over ? "#fb7185" : "#fff", lineHeight: 1, letterSpacing: -2 } }, Math.abs(remaining).toLocaleString()),
+      h("div", { style: { fontSize: S < 180 ? 36 : 44, fontWeight: 900, color: over ? "#fb7185" : "#fff", lineHeight: 1, letterSpacing: -2 } }, Math.abs(remaining).toLocaleString()),
       h("div", { style: { fontSize: 11, color: "rgba(255,255,255,0.25)", marginTop: 6 } }, eaten.toLocaleString() + " / " + target.toLocaleString() + " \u05e7\u05e7\u05f4\u05dc")));
 }
 
@@ -223,8 +228,8 @@ function EntryRow(props) {
       h("div", { style: { fontSize: 14, fontWeight: 600, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, props.title),
       props.sub ? h("div", { style: { fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 2 } }, props.sub) : null),
     h("span", { style: { fontSize: 13, fontWeight: 700, color: props.valColor || "#fff", flexShrink: 0 } }, props.val),
-    props.onEdit ? h("button", { onClick: props.onEdit, style: { background: "none", border: "none", color: "rgba(255,255,255,0.2)", cursor: "pointer", padding: 4, display: "flex" } }, h(IconEdit, { size: 14 })) : null,
-    h("button", { onClick: props.onDel, style: { background: "none", border: "none", color: "rgba(255,255,255,0.2)", cursor: "pointer", padding: 4, display: "flex" } }, h(IconTrash, { size: 14 })));
+    props.onEdit ? h("button", { onClick: props.onEdit, title: "עריכה", style: { width: 42, height: 42, minHeight: 42, background: "rgba(255,255,255,0.04)", border: "1px solid " + BORD, borderRadius: 14, color: "rgba(255,255,255,0.38)", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", justifyContent: "center" } }, h(IconEdit, { size: 16 })) : null,
+    h("button", { onClick: props.onDel, title: "מחיקה", style: { width: 42, height: 42, minHeight: 42, background: "rgba(255,255,255,0.04)", border: "1px solid " + BORD, borderRadius: 14, color: "rgba(255,255,255,0.32)", cursor: "pointer", padding: 0, display: "flex", alignItems: "center", justifyContent: "center" } }, h(IconTrash, { size: 16 })));
 }
 function SecHdr(props) {
   return h("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 } },
@@ -241,7 +246,7 @@ function FInput(props) {
   return h("div", { style: { marginBottom: 12 } },
     h("label", { style: { fontSize: 11, color: "rgba(255,255,255,0.35)", display: "block", marginBottom: 6, letterSpacing: 0.5 } }, props.label),
     h("input", { type: props.type || "text", value: props.value, placeholder: props.placeholder || "", onChange: function(e) { props.onChange(e.target.value); },
-      style: { width: "100%", background: "rgba(255,255,255,0.06)", border: "1px solid " + BORD, borderRadius: 12, padding: "12px 14px", fontSize: 14, color: "#fff", outline: "none", boxSizing: "border-box" },
+      style: { width: "100%", background: "rgba(255,255,255,0.06)", border: "1px solid " + BORD, borderRadius: 12, padding: "12px 14px", fontSize: 16, color: "#fff", outline: "none", boxSizing: "border-box" },
       onFocus: function(e) { e.target.style.borderColor = "#6366f1"; },
       onBlur: function(e) { e.target.style.borderColor = BORD; } }));
 }
@@ -255,21 +260,34 @@ function GradBtn(props) {
 function BottomNav(props) {
   var screen = props.screen, setScreen = props.setScreen;
   var tabs = [
-    { id: "today", icon: IconHome, label: "\u05d4\u05d9\u05d5\u05dd" },
-    { id: "history", icon: IconClock, label: "\u05d4\u05d9\u05e1\u05d8\u05d5\u05e8\u05d9\u05d4" },
-    { id: "saved", icon: IconBkmk, label: "\u05de\u05e0\u05d5\u05ea" },
-    { id: "settings", icon: IconCog, label: "\u05d4\u05d2\u05d3\u05e8\u05d5\u05ea" }
+    { id: "today", icon: IconHome, label: "היום" },
+    { id: "history", icon: IconClock, label: "מגמה" },
+    { id: "saved", icon: IconBkmk, label: "מנות" },
+    { id: "settings", icon: IconCog, label: "הגדרות" }
   ];
-  return h("div", { style: { position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 20, background: "rgba(7,9,15,0.95)", backdropFilter: "blur(20px)", borderTop: "1px solid " + BORD } },
-    h("div", { style: { maxWidth: 520, margin: "0 auto", display: "grid", gridTemplateColumns: "repeat(4,1fr)" } },
+  return h("div", { style: { position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 20, background: "rgba(7,9,15,0.92)", backdropFilter: "blur(22px)", WebkitBackdropFilter: "blur(22px)", borderTop: "1px solid " + BORD, paddingBottom: "env(safe-area-inset-bottom)" } },
+    h("div", { style: { maxWidth: 520, margin: "0 auto", padding: "8px 10px 10px", display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6 } },
       tabs.map(function(tab) {
         var active = screen === tab.id;
         return h("button", { key: tab.id, onClick: function() { setScreen(tab.id); },
-          style: { background: "none", border: "none", display: "flex", flexDirection: "column", alignItems: "center", padding: "12px 0 16px", gap: 4, cursor: "pointer", color: active ? "#818cf8" : "rgba(255,255,255,0.25)", transition: "color .2s", WebkitTapHighlightColor: "transparent" } },
-          h(tab.icon, { size: 22, sw: active ? 2.5 : 1.5 }),
-          h("span", { style: { fontSize: 10, fontWeight: 600 } }, tab.label),
-          active ? h("div", { style: { width: 4, height: 4, borderRadius: "50%", background: "#818cf8", marginTop: -2 } }) : null);
+          style: { minHeight: 58, background: active ? "rgba(129,140,248,0.16)" : "transparent", border: active ? "1px solid rgba(129,140,248,0.25)" : "1px solid transparent", borderRadius: 18, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "7px 0", gap: 3, cursor: "pointer", color: active ? "#a5b4fc" : "rgba(255,255,255,0.32)", transition: "all .18s", WebkitTapHighlightColor: "transparent" } },
+          h(tab.icon, { size: active ? 23 : 21, sw: active ? 2.5 : 1.5 }),
+          h("span", { style: { fontSize: 10, fontWeight: active ? 800 : 600 } }, tab.label));
       })));
+}
+
+// ── Quick actions ─────────────────────────────────────────────────────────────
+function QuickActions(props) {
+  function q(icon, label, sub, color, onClick) {
+    return h("button", { onClick: onClick, style: { minHeight: 76, background: "rgba(255,255,255,0.045)", border: "1px solid " + BORD, borderRadius: 18, padding: "10px 8px", color: "#fff", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, cursor: "pointer" } },
+      h("span", { style: { fontSize: 24, lineHeight: 1 } }, icon),
+      h("span", { style: { fontSize: 13, fontWeight: 800, color: color } }, label),
+      h("span", { style: { fontSize: 10, color: "rgba(255,255,255,0.28)", whiteSpace: "nowrap" } }, sub));
+  }
+  return h("div", { style: { display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 } },
+    q("✍️", "מלל", "תיאור אוכל", "#a5b4fc", function() { props.onFood("text"); }),
+    q("📷", "צילום", "תמונה מהאייפון", "#c4b5fd", function() { props.onFood("photo"); }),
+    q("🔥", "שריפה", "פעילות ידנית", "#fb923c", props.onBurn));
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────
@@ -307,7 +325,7 @@ function SettingsScreen(props) {
 // ── Food Modal ────────────────────────────────────────────────────────────────
 function FoodModal(props) {
   var saved = props.saved, onAdd = props.onAdd, onClose = props.onClose;
-  var s1 = useState("text"); var tab = s1[0], setTab = s1[1];
+  var s1 = useState(props.initialTab || "text"); var tab = s1[0], setTab = s1[1];
   var s2 = useState(""); var text = s2[0], setText = s2[1];
   var s3 = useState(null); var img64 = s3[0], setImg64 = s3[1];
   var s4 = useState(null); var result = s4[0], setResult = s4[1];
@@ -340,15 +358,17 @@ function FoodModal(props) {
       })),
     tab === "text" && h(React.Fragment, null,
       h("textarea", { placeholder: "\u05ea\u05d0\u05e8 \u05de\u05d4 \u05d0\u05db\u05dc\u05ea, \u05dc\u05de\u05e9\u05dc: 2 \u05e4\u05e8\u05d5\u05e1\u05d5\u05ea \u05dc\u05d7\u05dd \u05e2\u05dd \u05d2\u05d1\u05d9\u05e0\u05d4 9% \u05d5\u05d1\u05d9\u05e6\u05d4 \u05e7\u05e9\u05d4", value: text, onChange: function(e) { setText(e.target.value); },
-        style: { width: "100%", height: 90, background: "rgba(255,255,255,0.06)", border: "1px solid " + BORD, borderRadius: 12, padding: 12, fontSize: 14, color: "#fff", resize: "none", outline: "none", boxSizing: "border-box" } }),
+        style: { width: "100%", height: 90, background: "rgba(255,255,255,0.06)", border: "1px solid " + BORD, borderRadius: 12, padding: 12, fontSize: 16, color: "#fff", resize: "none", outline: "none", boxSizing: "border-box" } }),
       h(GradBtn, { onClick: analyze, disabled: !text || busy, style: { marginTop: 10 } }, busy ? h(IconLoader, { size: 16 }) : null, busy ? " \u05de\u05e0\u05ea\u05d7..." : "\u2728 \u05e0\u05ea\u05d7")),
     tab === "photo" && h(React.Fragment, null,
       h("div", { onClick: function() { fileRef.current && fileRef.current.click(); }, style: { border: "2px dashed " + (img64 ? "#4f46e5" : BORD), borderRadius: 16, padding: "28px 0", textAlign: "center", cursor: "pointer", marginBottom: 10 } },
-        img64 ? h("div", { style: { color: "#10b981", fontWeight: 700 } }, "\u2705 \u05ea\u05de\u05d5\u05e0\u05d4 \u05e0\u05d8\u05e2\u05e0\u05d4") :
-        h(React.Fragment, null, h("div", { style: { fontSize: 36, marginBottom: 6 } }, "\u{1f4f7}"), h("div", { style: { fontSize: 13, color: "rgba(255,255,255,0.3)" } }, "\u05dc\u05d7\u05e5 \u05dc\u05d1\u05d7\u05d9\u05e8\u05ea \u05ea\u05de\u05d5\u05e0\u05d4"))),
-      h("input", { ref: fileRef, type: "file", accept: "image/*", style: { display: "none" }, onChange: function(e) { if (e.target.files && e.target.files[0]) fileToB64(e.target.files[0]).then(setImg64); } }),
+        img64 ? h("div", null,
+          h("img", { src: "data:image/jpeg;base64," + img64, alt: "תצוגה מקדימה", style: { width: "100%", maxHeight: 190, objectFit: "cover", borderRadius: 14, marginBottom: 10, display: "block" } }),
+          h("div", { style: { color: "#10b981", fontWeight: 700, fontSize: 13 } }, "✅ תמונה נטענה — לחץ להחלפה")) :
+        h(React.Fragment, null, h("div", { style: { fontSize: 36, marginBottom: 6 } }, "📷"), h("div", { style: { fontSize: 13, color: "rgba(255,255,255,0.3)" } }, "לחץ לבחירת תמונה"))),
+      h("input", { ref: fileRef, type: "file", accept: "image/*", capture: "environment", style: { display: "none" }, onChange: function(e) { if (e.target.files && e.target.files[0]) fileToB64(e.target.files[0]).then(setImg64); } }),
       h("textarea", { placeholder: "\u05ea\u05d9\u05d0\u05d5\u05e8 \u05e0\u05d5\u05e1\u05e3 (\u05d0\u05d5\u05e4\u05e6\u05d9\u05d5\u05e0\u05dc\u05d9)...", value: text, onChange: function(e) { setText(e.target.value); },
-        style: { width: "100%", height: 56, background: "rgba(255,255,255,0.06)", border: "1px solid " + BORD, borderRadius: 12, padding: 12, fontSize: 13, color: "#fff", resize: "none", outline: "none", boxSizing: "border-box", marginBottom: 10 } }),
+        style: { width: "100%", height: 56, background: "rgba(255,255,255,0.06)", border: "1px solid " + BORD, borderRadius: 12, padding: 12, fontSize: 16, color: "#fff", resize: "none", outline: "none", boxSizing: "border-box", marginBottom: 10 } }),
       h(GradBtn, { onClick: analyze, disabled: !img64 || busy }, busy ? h(IconLoader, { size: 16 }) : null, busy ? " \u05de\u05e0\u05ea\u05d7..." : "\u2728 \u05e0\u05ea\u05d7 \u05ea\u05de\u05d5\u05e0\u05d4")),
     tab === "saved" && h("div", { style: { maxHeight: 300, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 } },
       saved.length === 0 ? h(Empty, { text: "\u05d0\u05d9\u05df \u05de\u05e0\u05d5\u05ea \u05e9\u05de\u05d5\u05e8\u05d5\u05ea" }) :
@@ -369,7 +389,7 @@ function FoodModal(props) {
           return h("div", { key: k, style: { gridColumn: k === "meal_name" ? "span 2" : "span 1" } },
             h("div", { style: { fontSize: 11, color: "rgba(255,255,255,0.3)", marginBottom: 4 } }, lbl),
             h("input", { type: t, value: result[k] != null ? result[k] : "", onChange: function(e) { setField(k, e.target.value); },
-              style: { width: "100%", background: "rgba(255,255,255,0.06)", border: "1px solid " + BORD, borderRadius: 10, padding: "9px 12px", fontSize: 14, color: "#fff", outline: "none", boxSizing: "border-box" } }));
+              style: { width: "100%", background: "rgba(255,255,255,0.06)", border: "1px solid " + BORD, borderRadius: 10, padding: "9px 12px", fontSize: 16, color: "#fff", outline: "none", boxSizing: "border-box" } }));
         })),
       h("label", { style: { display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "rgba(255,255,255,0.5)", cursor: "pointer", margin: "12px 0" } },
         h("input", { type: "checkbox", checked: saveAs, onChange: function(e) { setSaveAs(e.target.checked); }, style: { accentColor: "#6366f1" } }),
@@ -479,6 +499,8 @@ function CalTrack() {
   var s12 = useState(false); var busy = s12[0], setBusy = s12[1];
   var s13 = useState(null); var modal = s13[0], setModal = s13[1];
   var s14 = useState(null); var editTarget = s14[0], setEditTarget = s14[1];
+  var s15 = useState("text"); var initialFoodTab = s15[0], setInitialFoodTab = s15[1];
+  function openFood(tab) { setInitialFoodTab(tab || "text"); setModal("food"); }
 
   function closeModal() { setModal(null); setEditTarget(null); }
   function connect() {
@@ -596,7 +618,7 @@ function CalTrack() {
 
   // Today screen
   function TodayScreen() {
-    return h("div", { style: { display: "flex", flexDirection: "column", gap: 16 } },
+    return h("div", { className: "mobile-tight", style: { display: "flex", flexDirection: "column", gap: 16 } },
       // Header
       h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start" } },
         h("div", null,
@@ -611,8 +633,10 @@ function CalTrack() {
           h(StatChip, { label: "\u05d0\u05db\u05dc\u05ea\u05d9 \u05e7\u05e7\u05f4\u05dc", val: totalEaten }),
           h(StatChip, { label: "\u05d9\u05e2\u05d3 \u05e7\u05e7\u05f4\u05dc", val: targetCal, color: "#818cf8" }),
           h(StatChip, { label: "\u05e9\u05e8\u05d9\u05e4\u05d4 \u05e6\u05e4\u05d5\u05d9\u05d4", val: projectedBurn, color: "#fb923c" }))),
+      // Quick actions
+      h(QuickActions, { onFood: openFood, onBurn: function() { setModal("burn"); } }),
       // Forecast
-      h(GlassCard, null,
+      h(GlassCard, { style: { padding: 14 } },
         h("div", { style: { fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.3)", letterSpacing: 1, textTransform: "uppercase", marginBottom: 10 } }, "\u{1f4ca} \u05ea\u05d7\u05d6\u05d9\u05ea \u05dc\u05e1\u05d5\u05e3 \u05d4\u05d9\u05d5\u05dd"),
         h(FRow, { label: "\u05e9\u05e8\u05d9\u05e4\u05d4 \u05e6\u05e4\u05d5\u05d9\u05d4 (TDEE + \u05e4\u05e2\u05d9\u05dc\u05d5\u05ea)", val: projectedBurn, color: "#fb923c" }),
         h(FRow, { label: "\u05e0\u05d0\u05db\u05dc \u05e2\u05d3 \u05db\u05d4", val: totalEaten }),
@@ -634,13 +658,14 @@ function CalTrack() {
           h(MLRow, { c: "#60a5fa", l: "\u05d7\u05dc\u05d1\u05d5\u05df", g: todayP }),
           h(MLRow, { c: "#fbbf24", l: "\u05e4\u05d7\u05de\u05d9\u05de\u05d5\u05ea", g: todayC }),
           h(MLRow, { c: "#f472b6", l: "\u05e9\u05d5\u05de\u05df", g: todayF }))) : null,
-      // AI button
+      // AI inline card
       h("button", { onClick: function() { setModal("recommend"); },
-        style: { width: "100%", background: "linear-gradient(135deg,#6d28d9,#7c3aed,#a21caf)", border: "none", borderRadius: 18, padding: "16px 0", fontSize: 15, fontWeight: 800, color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, letterSpacing: 0.3 } },
-        h(IconSpark, { size: 18 }), "\u05d4\u05de\u05dc\u05e6\u05ea \u05d0\u05e8\u05d5\u05d7\u05d4 \u05dc\u05e4\u05d9 \u05d4\u05d9\u05ea\u05e8\u05d4 \u05e9\u05dc\u05d9"),
+        style: { width: "100%", background: "linear-gradient(135deg,rgba(109,40,217,.22),rgba(162,28,175,.18))", border: "1px solid rgba(167,139,250,.26)", borderRadius: 20, padding: "14px 16px", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, textAlign: "right" } },
+        h("div", { style: { display: "flex", alignItems: "center", gap: 10 } }, h(IconSpark, { size: 20 }), h("div", null, h("div", { style: { fontSize: 14, fontWeight: 900 } }, "מה כדאי לאכול עכשיו?"), h("div", { style: { fontSize: 11, color: "rgba(255,255,255,.38)", marginTop: 2 } }, "המלצה לפי יתרת הקלוריות והמקרו"))),
+        h("span", { style: { fontSize: 13, fontWeight: 800, color: "#c4b5fd", whiteSpace: "nowrap" } }, Math.max(remaining,0).toLocaleString() + " קק״ל")),
       // Meals
       h("div", null,
-        h(SecHdr, { title: "\u05d0\u05e8\u05d5\u05d7\u05d5\u05ea", onAdd: function() { setModal("food"); }, addColor: "#4f46e5" }),
+        h(SecHdr, { title: "ארוחות", onAdd: function() { openFood("text"); }, addColor: "#4f46e5" }),
         h("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
           meals.length === 0 ? h(Empty, { text: "\u05dc\u05d0 \u05d4\u05d5\u05d6\u05e0\u05d5 \u05d0\u05e8\u05d5\u05d7\u05d5\u05ea \u05e2\u05d3\u05d9\u05d9\u05df" }) :
           h(React.Fragment, null,
@@ -706,7 +731,7 @@ function CalTrack() {
     return h("div", { style: { display: "flex", flexDirection: "column", gap: 16 } },
       h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
         h("h1", { style: { fontSize: 28, fontWeight: 900, margin: 0, letterSpacing: -1 } }, "\u05de\u05e0\u05d5\u05ea \u05e9\u05de\u05d5\u05e8\u05d5\u05ea"),
-        h("button", { onClick: function() { setModal("addsaved"); }, style: { background: "#4f46e5", border: "none", borderRadius: "50%", width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff" } }, h(IconPlus, { size: 18 }))),
+        h("button", { onClick: function() { setModal("addsaved"); }, style: { background: "#4f46e5", border: "none", borderRadius: "50%", width: 44, height: 44, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#fff" } }, h(IconPlus, { size: 18 }))),
       h("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
         saved.length === 0 ? h("div", { style: { textAlign: "center", color: "rgba(255,255,255,0.15)", padding: "48px 0" } }, "\u05d0\u05d9\u05df \u05de\u05e0\u05d5\u05ea \u05e9\u05de\u05d5\u05e8\u05d5\u05ea \u05e2\u05d3\u05d9\u05d9\u05df") :
         saved.map(function(m) {
@@ -718,15 +743,15 @@ function CalTrack() {
   }
 
   return h("div", { dir: "rtl", style: { minHeight: "100vh", background: BG, color: "#fff" } },
-    h("div", { style: { maxWidth: 520, margin: "0 auto", padding: "16px 16px 96px" } },
+    h("div", { className: "app-shell" },
       screen === "today" ? h(TodayScreen, null) : null,
       screen === "history" ? h(HistoryScreen, null) : null,
       screen === "saved" ? h(SavedScreen, null) : null,
       screen === "settings" ? h(SettingsScreen, { settings: settings, onSave: saveSettings }) : null),
     h(BottomNav, { screen: screen, setScreen: setScreen }),
     modal ? h("div", { style: { position: "fixed", inset: 0, zIndex: 50, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "flex-end", justifyContent: "center" }, onClick: closeModal },
-      h("div", { style: { width: "100%", maxWidth: 520, background: "#0d1117", borderTop: "1px solid " + BORD, borderRadius: "24px 24px 0 0", padding: "20px 20px 40px", maxHeight: "88vh", overflowY: "auto" }, onClick: function(e) { e.stopPropagation(); } },
-        modal === "food" ? h(FoodModal, { saved: saved, onAdd: addMeal, onClose: closeModal }) : null,
+      h("div", { style: { width: "100%", maxWidth: 520, background: "#0d1117", borderTop: "1px solid " + BORD, borderRadius: "24px 24px 0 0", padding: "18px 18px calc(28px + env(safe-area-inset-bottom))", maxHeight: "88vh", overflowY: "auto" }, onClick: function(e) { e.stopPropagation(); } },
+        modal === "food" ? h(FoodModal, { saved: saved, onAdd: addMeal, onClose: closeModal, initialTab: initialFoodTab }) : null,
         modal === "burn" ? h(BurnModal, { onAdd: addBurn, onClose: closeModal }) : null,
         modal === "addsaved" ? h(AddSavedModal, { onAdd: addSaved, onClose: closeModal }) : null,
         modal === "edit" && editTarget ? h(EditModal, { type: editTarget.type, item: editTarget.item, onSave: editTarget.type === "meal" ? updateMeal : updateBurn, onClose: closeModal }) : null,
