@@ -392,7 +392,8 @@ function FoodModal(props) {
   var s6 = useState(false); var saving = s6[0], setSaving = s6[1];
   var s7 = useState(false); var saveAs = s7[0], setSaveAs = s7[1];
   var s8 = useState(""); var err = s8[0], setErr = s8[1];
-  var fileRef = useRef();
+  var fileRefCam = useRef(); var fileRefGallery = useRef();
+  function pickFile(e) { if (e.target.files && e.target.files[0]) fileToB64(e.target.files[0]).then(setImg64); e.target.value = ""; }
   function switchTab(t) { setTab(t); setResult(null); setErr(""); setText(""); setImg64(null); }
   function analyze() {
     if (!text && !img64) return;
@@ -420,15 +421,19 @@ function FoodModal(props) {
         style: { width: "100%", height: 90, background: "rgba(255,255,255,0.06)", border: "1px solid " + BORD, borderRadius: 12, padding: 12, fontSize: 16, color: "#fff", resize: "none", outline: "none", boxSizing: "border-box" } }),
       h(GradBtn, { onClick: analyze, disabled: !text || busy, style: { marginTop: 10 } }, busy ? h(IconLoader, { size: 16 }) : null, busy ? " \u05de\u05e0\u05ea\u05d7..." : "\u2728 \u05e0\u05ea\u05d7")),
     tab === "photo" && h(React.Fragment, null,
-      h("div", { onClick: function() { fileRef.current && fileRef.current.click(); }, style: { border: "2px dashed " + (img64 ? "#4f46e5" : BORD), borderRadius: 16, padding: "28px 0", textAlign: "center", cursor: "pointer", marginBottom: 10 } },
+      h("div", { onClick: function() { fileRefGallery.current && fileRefGallery.current.click(); }, style: { border: "2px dashed " + (img64 ? "#4f46e5" : BORD), borderRadius: 16, padding: img64 ? "12px" : "26px 0", textAlign: "center", cursor: "pointer", marginBottom: 10 } },
         img64 ? h("div", null,
           h("img", { src: "data:image/jpeg;base64," + img64, alt: "תצוגה מקדימה", style: { width: "100%", maxHeight: 190, objectFit: "cover", borderRadius: 14, marginBottom: 10, display: "block" } }),
           h("div", { style: { color: "#10b981", fontWeight: 700, fontSize: 13 } }, "✅ תמונה נטענה — לחץ להחלפה")) :
-        h(React.Fragment, null, h("div", { style: { fontSize: 36, marginBottom: 6 } }, "📷"), h("div", { style: { fontSize: 13, color: "rgba(255,255,255,0.3)" } }, "לחץ לבחירת תמונה"))),
-      h("input", { ref: fileRef, type: "file", accept: "image/*", capture: "environment", style: { display: "none" }, onChange: function(e) { if (e.target.files && e.target.files[0]) fileToB64(e.target.files[0]).then(setImg64); } }),
-      h("textarea", { placeholder: "\u05ea\u05d9\u05d0\u05d5\u05e8 \u05e0\u05d5\u05e1\u05e3 (\u05d0\u05d5\u05e4\u05e6\u05d9\u05d5\u05e0\u05dc\u05d9)...", value: text, onChange: function(e) { setText(e.target.value); },
+        h(React.Fragment, null, h("div", { style: { fontSize: 36, marginBottom: 6 } }, "🍽️"), h("div", { style: { fontSize: 13, color: "rgba(255,255,255,0.3)" } }, "בחר תמונה לניתוח"))),
+      h("div", { style: { display: "flex", gap: 8, marginBottom: 10 } },
+        h("button", { onClick: function() { fileRefCam.current && fileRefCam.current.click(); }, style: { flex: 1, padding: "11px 0", borderRadius: 12, background: "rgba(255,255,255,0.06)", border: "1px solid " + BORD, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" } }, "📷 צלם תמונה"),
+        h("button", { onClick: function() { fileRefGallery.current && fileRefGallery.current.click(); }, style: { flex: 1, padding: "11px 0", borderRadius: 12, background: "rgba(255,255,255,0.06)", border: "1px solid " + BORD, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" } }, "🖼️ העלה מהמכשיר")),
+      h("input", { ref: fileRefCam, type: "file", accept: "image/*", capture: "environment", style: { display: "none" }, onChange: pickFile }),
+      h("input", { ref: fileRefGallery, type: "file", accept: "image/*", style: { display: "none" }, onChange: pickFile }),
+      h("textarea", { placeholder: "תיאור נוסף (אופציונלי)...", value: text, onChange: function(e) { setText(e.target.value); },
         style: { width: "100%", height: 56, background: "rgba(255,255,255,0.06)", border: "1px solid " + BORD, borderRadius: 12, padding: 12, fontSize: 16, color: "#fff", resize: "none", outline: "none", boxSizing: "border-box", marginBottom: 10 } }),
-      h(GradBtn, { onClick: analyze, disabled: !img64 || busy }, busy ? h(IconLoader, { size: 16 }) : null, busy ? " \u05de\u05e0\u05ea\u05d7..." : "\u2728 \u05e0\u05ea\u05d7 \u05ea\u05de\u05d5\u05e0\u05d4")),
+      h(GradBtn, { onClick: analyze, disabled: !img64 || busy }, busy ? h(IconLoader, { size: 16 }) : null, busy ? " מנתח..." : "✨ נתח תמונה")),
     tab === "saved" && h("div", { style: { maxHeight: 300, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 } },
       saved.length === 0 ? h(Empty, { text: "\u05d0\u05d9\u05df \u05de\u05e0\u05d5\u05ea \u05e9\u05de\u05d5\u05e8\u05d5\u05ea" }) :
       saved.map(function(m) {
