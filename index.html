@@ -53,20 +53,26 @@ function makeSB(url, key) {
   };
 }
 
+function parseJSON(text, wantArray) {
+  var t = (text || "").replace(/```[a-z]*/gi, "").replace(/```/g, "").trim();
+  var o = wantArray ? "[" : "{", c = wantArray ? "]" : "}";
+  var i = t.indexOf(o), j = t.lastIndexOf(c);
+  if (i !== -1 && j > i) t = t.slice(i, j + 1);
+  return JSON.parse(t);
+}
 function analyzeFood(desc, img64) {
   var content = [];
   if (img64) content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: img64 } });
   var ctx = img64 ? ("Look at this food image" + (desc ? ' and description: "' + desc + '"' : "") + ".") : ('Food: "' + desc + '"');
-  content.push({ type: "text", text: ctx + "\n\nYou estimate nutrition. Reason about the PORTION ACTUALLY SHOWN, not package or label totals.\nRules:\n1) Estimate the real serving size actually shown or described.\n2) If a nutrition number is given (e.g. 42g protein) it normally describes the WHOLE product as printed on the label, NOT the shown portion. Estimate what fraction of the full product appears and scale ALL macros to that fraction. Use a label number directly only if the shown amount clearly equals one full labeled serving.\n3) Derive calories from macros (protein 4, carbs 4, fat 9 kcal per g) and sanity-check.\nReturn ONLY valid JSON with the reasoning fields FIRST so they guide the numbers:\n{\"meal_name\":\"שם קצר בעברית\",\"portion_estimate\":\"הערכת המנה בפועל\",\"reasoning\":\"קצר - איך טופלו מספרי תווית והמנה\",\"calories\":0,\"protein\":0,\"carbs\":0,\"fat\":0}" });
+  content.push({ type: "text", text: ctx + "\n\nYou are an accurate nutrition estimator. Give a REALISTIC estimate based on typical real-world portion sizes; do not systematically under-estimate or over-estimate.\nRules:\n1) Identify the dish and estimate the actual portion shown or described. When size is unclear, assume a typical real serving rather than a minimal one.\n2) If a nutrition number is given (e.g. 42g protein) it usually refers to the WHOLE product/package as printed on the label, NOT the shown portion - estimate what fraction is shown and scale accordingly. Use a label number directly only if the shown amount equals one full labeled serving.\n3) Break the meal into its main components. For each component estimate calories and macros (protein 4, carbs 4, fat 9 kcal per g). Totals MUST equal the sum of the items.\nReturn ONLY valid JSON, reasoning fields first:\n{\"meal_name\":\"שם בעברית\",\"portion_estimate\":\"הערכת המנה\",\"reasoning\":\"קצר\",\"items\":[{\"name\":\"רכיב בעברית\",\"calories\":0,\"protein\":0,\"carbs\":0,\"fat\":0}],\"calories\":0,\"protein\":0,\"carbs\":0,\"fat\":0}" });
   return fetch("/.netlify/functions/claude", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 500, messages: [{ role: "user", content: content }] })
+    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1000, messages: [{ role: "user", content: content }] })
   }).then(function(r) { return r.json(); }).then(function(d) {
     if (!d.content || !d.content[0] || !d.content[0].text) {
       throw new Error((d.error && d.error.message) ? d.error.message : JSON.stringify(d).slice(0, 300));
     }
-    var text = d.content[0].text;
-    return JSON.parse(text.replace(/```[a-z]*/g, "").replace(/```/g, "").trim());
+    return parseJSON(d.content[0].text, false);
   });
 }
 
@@ -88,7 +94,7 @@ function analyzeActivity(desc, weight) {
     body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 400, messages: [{ role: "user", content: prompt }] }) })
     .then(function(r) { return r.json(); }).then(function(d) {
       if (!d.content || !d.content[0] || !d.content[0].text) throw new Error((d.error && d.error.message) ? d.error.message : JSON.stringify(d).slice(0, 300));
-      return JSON.parse(d.content[0].text.replace(/```[a-z]*/g, "").replace(/```/g, "").trim());
+      return parseJSON(d.content[0].text, false);
     });
 }
 
@@ -101,7 +107,7 @@ function getRecommendations(remaining, p, c, f, goalId, proteinRem) {
     body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 900, messages: [{ role: "user", content: prompt }] }) })
     .then(function(r) { return r.json(); }).then(function(d) {
       if (!d.content || !d.content[0] || !d.content[0].text) throw new Error((d.error && d.error.message) ? d.error.message : JSON.stringify(d).slice(0, 300));
-      return JSON.parse(d.content[0].text.replace(/```[a-z]*/g, "").replace(/```/g, "").trim());
+      return parseJSON(d.content[0].text, true);
     });
 }
 
@@ -399,7 +405,7 @@ function FoodModal(props) {
     if (!text && !img64) return;
     setBusy(true); setErr(""); setResult(null);
     analyzeFood(text, img64).then(function(r) {
-      setResult({ meal_name: r.meal_name || "", calories: r.calories || 0, protein: r.protein || 0, carbs: r.carbs || 0, fat: r.fat || 0, _portion: r.portion_estimate || "", _reasoning: r.reasoning || "" });
+      setResult({ meal_name: r.meal_name || "", calories: r.calories || 0, protein: r.protein || 0, carbs: r.carbs || 0, fat: r.fat || 0, _portion: r.portion_estimate || "", _reasoning: r.reasoning || "", _items: Array.isArray(r.items) ? r.items : [] });
     }).catch(function(e) { setErr("\u05e9\u05d2\u05d9\u05d0\u05d4: " + ((e && e.message) ? e.message : "\u05e0\u05e1\u05d4 \u05e9\u05d5\u05d1")); }).finally(function() { setBusy(false); });
   }
   function handleAdd() {
@@ -408,6 +414,10 @@ function FoodModal(props) {
     Promise.resolve(onAdd(result, saveAs)).finally(function() { setSaving(false); });
   }
   function setField(k, v) { setResult(function(r) { var n = Object.assign({}, r); n[k] = v; return n; }); }
+  function recalcFromItems(items) { return items.reduce(function(a, it) { return { calories: a.calories + (+it.calories || 0), protein: a.protein + (+it.protein || 0), carbs: a.carbs + (+it.carbs || 0), fat: a.fat + (+it.fat || 0) }; }, { calories: 0, protein: 0, carbs: 0, fat: 0 }); }
+  function setItem(idx, key, val) { setResult(function(r) { var items = (r._items || []).slice(); items[idx] = Object.assign({}, items[idx]); items[idx][key] = val; var s = recalcFromItems(items); return Object.assign({}, r, { _items: items, calories: Math.round(s.calories), protein: Math.round(s.protein), carbs: Math.round(s.carbs), fat: Math.round(s.fat) }); }); }
+  function removeItem(idx) { setResult(function(r) { var items = (r._items || []).filter(function(_, i) { return i !== idx; }); var s = recalcFromItems(items); return Object.assign({}, r, { _items: items, calories: Math.round(s.calories), protein: Math.round(s.protein), carbs: Math.round(s.carbs), fat: Math.round(s.fat) }); }); }
+  function addItem() { setResult(function(r) { return Object.assign({}, r, { _items: (r._items || []).concat([{ name: "", calories: 0, protein: 0, carbs: 0, fat: 0 }]) }); }); }
   var tabStyle = function(active) { return { flex: 1, padding: "9px 0", borderRadius: 10, fontSize: 12, fontWeight: 700, background: active ? "#4f46e5" : "transparent", border: "none", color: active ? "#fff" : "rgba(255,255,255,0.35)", cursor: "pointer" }; };
   var fields = [["meal_name", "\u05e9\u05dd \u05d4\u05de\u05e0\u05d4", "text"], ["calories", "\u05e7\u05dc\u05d5\u05e8\u05d9\u05d5\u05ea", "number"], ["protein", "\u05d7\u05dc\u05d1\u05d5\u05df (g)", "number"], ["carbs", "\u05e4\u05d7\u05de\u05d9\u05de\u05d5\u05ea (g)", "number"], ["fat", "\u05e9\u05d5\u05de\u05df (g)", "number"]];
   return h("div", { dir: "rtl" },
@@ -450,6 +460,21 @@ function FoodModal(props) {
       (result._portion || result._reasoning) ? h("div", { style: { background: "rgba(129,140,248,0.08)", border: "1px solid rgba(129,140,248,0.22)", borderRadius: 12, padding: "10px 12px", marginBottom: 12, fontSize: 12, color: "rgba(255,255,255,0.7)", lineHeight: 1.5 } },
         result._portion ? h("div", null, h("span", { style: { color: "#a5b4fc", fontWeight: 700 } }, "הערכת מנה: "), result._portion) : null,
         result._reasoning ? h("div", { style: { marginTop: result._portion ? 4 : 0 } }, h("span", { style: { color: "#a5b4fc", fontWeight: 700 } }, "הסבר: "), result._reasoning) : null) : null,
+      (result._items && result._items.length) ? h("div", { style: { marginBottom: 14 } },
+        h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 } },
+          h("span", { style: { fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.4)" } }, "מרכיבים (ניתן לערוך)"),
+          h("span", { style: { fontSize: 10, color: "rgba(255,255,255,0.28)" } }, "קק״ל · חלבון")),
+        result._items.map(function(it, idx) {
+          return h("div", { key: idx, style: { display: "flex", gap: 6, alignItems: "center", marginBottom: 6 } },
+            h("input", { value: it.name != null ? it.name : "", onChange: function(e) { setItem(idx, "name", e.target.value); }, placeholder: "רכיב",
+              style: { flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid " + BORD, borderRadius: 9, padding: "8px 10px", fontSize: 14, color: "#fff", outline: "none", boxSizing: "border-box" } }),
+            h("input", { type: "number", value: it.calories != null ? it.calories : "", onChange: function(e) { setItem(idx, "calories", e.target.value); },
+              style: { width: 62, background: "rgba(255,255,255,0.06)", border: "1px solid " + BORD, borderRadius: 9, padding: "8px 4px", fontSize: 14, color: "#fff", outline: "none", boxSizing: "border-box", textAlign: "center" } }),
+            h("input", { type: "number", value: it.protein != null ? it.protein : "", onChange: function(e) { setItem(idx, "protein", e.target.value); },
+              style: { width: 50, background: "rgba(255,255,255,0.06)", border: "1px solid " + BORD, borderRadius: 9, padding: "8px 4px", fontSize: 14, color: "#60a5fa", outline: "none", boxSizing: "border-box", textAlign: "center" } }),
+            h("button", { onClick: function() { removeItem(idx); }, style: { background: "none", border: "none", color: "rgba(255,255,255,0.35)", fontSize: 20, cursor: "pointer", padding: "0 2px", minHeight: 0, lineHeight: 1 } }, "×"));
+        }),
+        h("button", { onClick: addItem, style: { background: "none", border: "none", color: "#a5b4fc", fontSize: 12, fontWeight: 700, cursor: "pointer", minHeight: 0, padding: "2px 0", marginTop: 2 } }, "+ הוסף רכיב")) : null,
       h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 } },
         fields.map(function(arr) {
           var k = arr[0], lbl = arr[1], t = arr[2];
