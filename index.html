@@ -30,7 +30,8 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 "use strict";
 var h = React.createElement;
 var BG = "#0d1326", CARD = "rgba(255,255,255,0.055)", CARD2 = "rgba(255,255,255,0.03)", BORD = "rgba(255,255,255,0.09)";
-var TODAY = new Date().toISOString().split("T")[0];
+function isoDate(d) { d = d || new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().split("T")[0]; }
+function todayStr() { return isoDate(); }
 var useState = React.useState, useEffect = React.useEffect, useRef = React.useRef, useCallback = React.useCallback;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -632,9 +633,9 @@ function CalTrack() {
     if (!sb) return Promise.resolve();
     setBusy(true);
     return Promise.all([
-      sb("garmin_daily", "GET", null, "?date=eq." + TODAY + "&limit=1"),
-      sb("meal_logs", "GET", null, "?date=eq." + TODAY + "&order=created_at.asc"),
-      sb("manual_burns", "GET", null, "?date=eq." + TODAY + "&order=created_at.asc")
+      sb("garmin_daily", "GET", null, "?date=eq." + todayStr() + "&limit=1"),
+      sb("meal_logs", "GET", null, "?date=eq." + todayStr() + "&order=created_at.asc"),
+      sb("manual_burns", "GET", null, "?date=eq." + todayStr() + "&order=created_at.asc")
     ]).then(function(results) {
       setGarmin(results[0] && results[0][0] ? results[0][0] : null);
       setMeals(results[1] || []);
@@ -650,11 +651,11 @@ function CalTrack() {
   var loadHist = useCallback(function() {
     if (!sb) return Promise.resolve();
     var from = new Date(); from.setDate(from.getDate() - 30);
-    var f = from.toISOString().split("T")[0];
+    var f = isoDate(from);
     return Promise.all([
-      sb("meal_logs", "GET", null, "?date=gte." + f + "&date=lt." + TODAY + "&order=date.asc"),
-      sb("manual_burns", "GET", null, "?date=gte." + f + "&date=lt." + TODAY + "&order=date.asc"),
-      sb("garmin_daily", "GET", null, "?date=gte." + f + "&date=lt." + TODAY + "&order=date.asc")
+      sb("meal_logs", "GET", null, "?date=gte." + f + "&date=lt." + todayStr() + "&order=date.asc"),
+      sb("manual_burns", "GET", null, "?date=gte." + f + "&date=lt." + todayStr() + "&order=date.asc"),
+      sb("garmin_daily", "GET", null, "?date=gte." + f + "&date=lt." + todayStr() + "&order=date.asc")
     ]).then(function(results) {
       var ml = results[0] || [], bl = results[1] || [], gl = results[2] || [];
       var map = {};
@@ -703,7 +704,7 @@ function CalTrack() {
   var hd = histView[histIdx] || { eaten: 0, burned: 0, burnRaw: 0, balance: 0, p: 0, c: 0, f: 0 };
 
   function addMeal(meal, saveAsM) {
-    return sb("meal_logs", "POST", { date: TODAY, meal_name: meal.meal_name, calories: +meal.calories, protein: +meal.protein, carbs: +meal.carbs, fat: +meal.fat })
+    return sb("meal_logs", "POST", { date: todayStr(), meal_name: meal.meal_name, calories: +meal.calories, protein: +meal.protein, carbs: +meal.carbs, fat: +meal.fat })
       .then(function() { if (saveAsM) return sb("saved_meals", "POST", { name: meal.meal_name, calories: +meal.calories, protein: +meal.protein, carbs: +meal.carbs, fat: +meal.fat }); })
       .then(function() { closeModal(); return loadToday(); });
   }
@@ -713,7 +714,7 @@ function CalTrack() {
   }
   function deleteMeal(id) { return sb("meal_logs", "DELETE", null, "?id=eq." + id).then(loadToday); }
   function addBurn(b) {
-    return sb("manual_burns", "POST", { date: TODAY, activity: b.activity, calories: +b.calories })
+    return sb("manual_burns", "POST", { date: todayStr(), activity: b.activity, calories: +b.calories })
       .then(function() { closeModal(); return loadToday(); });
   }
   function updateBurn(id, data) {
