@@ -385,7 +385,8 @@ function SettingsScreen(props) {
       h(GradBtn, { onClick: save, gradient: ok ? "linear-gradient(135deg,#10b981,#059669)" : "linear-gradient(135deg,#4f46e5,#7c3aed)" }, ok ? "✅ נשמר!" : "שמור הגדרות")),
     h(GlassCard, null,
       secTitle("אודות"),
-      h("p", { style: { fontSize: 12, color: "rgba(255,255,255,0.3)", lineHeight: 1.6, margin: 0 } }, "CalTrack מסנכרן נתוני Garmin אוטומטית. ניתוח מזון ופעילות ב-AI ע״י Claude Sonnet. נתונים מאוחסנים ב-Supabase.")));
+      h("p", { style: { fontSize: 12, color: "rgba(255,255,255,0.3)", lineHeight: 1.6, margin: 0 } }, "CalTrack מסנכרן נתוני Garmin אוטומטית. ניתוח מזון ופעילות ב-AI ע״י Claude Sonnet. נתונים מאוחסנים ב-Supabase."),
+      h("button", { onClick: props.onLogout, style: { width: "100%", marginTop: 14, background: "rgba(244,63,94,0.1)", border: "1px solid rgba(244,63,94,0.3)", borderRadius: 12, padding: "10px 0", fontSize: 13, fontWeight: 700, color: "#fb7185", cursor: "pointer" } }, "נתק חיבור")));
 }
 
 // ── Food Modal ────────────────────────────────────────────────────────────────
@@ -595,9 +596,9 @@ function RecommendModal(props) {
 
 // ── Main App ──────────────────────────────────────────────────────────────────
 function CalTrack() {
-  var s1 = useState(""); var sbUrl = s1[0], setSbUrl = s1[1];
-  var s2 = useState(""); var sbKey = s2[0], setSbKey = s2[1];
-  var s3 = useState(null); var sb = s3[0], setSb = s3[1];
+  var s1 = useState(function() { try { return localStorage.getItem("sb_url") || ""; } catch (e) { return ""; } }); var sbUrl = s1[0], setSbUrl = s1[1];
+  var s2 = useState(function() { try { return localStorage.getItem("sb_key") || ""; } catch (e) { return ""; } }); var sbKey = s2[0], setSbKey = s2[1];
+  var s3 = useState(function() { try { var u = localStorage.getItem("sb_url"), k = localStorage.getItem("sb_key"); return (u && k) ? makeSB(u, k) : null; } catch (e) { return null; } }); var sb = s3[0], setSb = s3[1];
   var s4 = useState("today"); var screen = s4[0], setScreen = s4[1];
   var s5 = useState({ tdee: 2080, goal_deficit: 350, weight: 75, goal: "cut", protein_target: 165 }); var settings = s5[0], setSettings = s5[1];
   var s6 = useState(null); var garmin = s6[0], setGarmin = s6[1];
@@ -618,8 +619,13 @@ function CalTrack() {
   function connect() {
     var u = sbUrl.trim(), k = sbKey.trim();
     if (!u || !k) return;
+    try { localStorage.setItem("sb_url", u); localStorage.setItem("sb_key", k); } catch (e) {}
     var client = makeSB(u, k);
     setSb(function() { return client; });
+  }
+  function disconnect() {
+    try { localStorage.removeItem("sb_url"); localStorage.removeItem("sb_key"); } catch (e) {}
+    setSb(function() { return null; }); setSbUrl(""); setSbKey("");
   }
 
   var loadSettings = useCallback(function() {
@@ -906,7 +912,7 @@ function CalTrack() {
       screen === "today" ? h(TodayScreen, null) : null,
       screen === "history" ? h(HistoryScreen, null) : null,
       screen === "saved" ? h(SavedScreen, null) : null,
-      screen === "settings" ? h(SettingsScreen, { settings: settings, onSave: saveSettings }) : null),
+      screen === "settings" ? h(SettingsScreen, { settings: settings, onSave: saveSettings, onLogout: disconnect }) : null),
     h(BottomNav, { screen: screen, setScreen: setScreen }),
     modal ? h("div", { style: { position: "fixed", inset: 0, zIndex: 50, background: "rgba(6,9,18,0.72)", backdropFilter: "blur(4px)", WebkitBackdropFilter: "blur(4px)", display: "flex", alignItems: "flex-end", justifyContent: "center" }, onClick: closeModal },
       h("div", { style: { width: "100%", maxWidth: 520, background: "linear-gradient(180deg,#141a2e,#0f1424)", borderTop: "1px solid rgba(255,255,255,0.12)", borderRadius: "26px 26px 0 0", boxShadow: "0 -20px 60px rgba(0,0,0,0.5)", padding: "18px 18px calc(28px + env(safe-area-inset-bottom))", maxHeight: "88vh", overflowY: "auto" }, onClick: function(e) { e.stopPropagation(); } },
