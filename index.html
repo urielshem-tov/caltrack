@@ -61,10 +61,11 @@ function parseJSON(text, wantArray) {
   if (i !== -1 && j > i) t = t.slice(i, j + 1);
   return JSON.parse(t);
 }
-function analyzeFood(desc, img64) {
+function analyzeFood(desc, imgs) {
+  imgs = imgs || [];
   var content = [];
-  if (img64) content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: img64 } });
-  var ctx = img64 ? ("Look at this food image" + (desc ? ' and description: "' + desc + '"' : "") + ".") : ('Food: "' + desc + '"');
+  imgs.forEach(function(b) { content.push({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b } }); });
+  var ctx = imgs.length ? ("Look at " + (imgs.length > 1 ? "these " + imgs.length + " food images - they are parts of the SAME meal, analyze them together as ONE combined meal" : "this food image") + (desc ? ' and description: "' + desc + '"' : "") + ".") : ('Food: "' + desc + '"');
   content.push({ type: "text", text: ctx + "\n\nYou are an accurate nutrition estimator. Give a REALISTIC estimate based on typical real-world portion sizes; do not systematically under-estimate or over-estimate.\nRules:\n1) Identify the dish and estimate the actual portion shown or described. When size is unclear, assume a typical real serving rather than a minimal one.\n2) If a nutrition number is given (e.g. 42g protein) it usually refers to the WHOLE product/package as printed on the label, NOT the shown portion - estimate what fraction is shown and scale accordingly. Use a label number directly only if the shown amount equals one full labeled serving.\n3) Break the meal into its main components. For each component estimate calories and macros (protein 4, carbs 4, fat 9 kcal per g). Totals MUST equal the sum of the items.\nReturn ONLY valid JSON, reasoning fields first:\n{\"meal_name\":\"שם בעברית\",\"portion_estimate\":\"הערכת המנה\",\"reasoning\":\"קצר\",\"items\":[{\"name\":\"רכיב בעברית\",\"calories\":0,\"protein\":0,\"carbs\":0,\"fat\":0}],\"calories\":0,\"protein\":0,\"carbs\":0,\"fat\":0}" });
   return fetch("/.netlify/functions/claude", {
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -179,7 +180,7 @@ function BarChart(props) {
   var pressing = useRef(false);
   var wrapRef = useRef(null);
   if (!data.length) return h("div", { style: { textAlign: "center", color: "rgba(255,255,255,0.2)", padding: "44px 0", fontSize: 13 } }, "אין נתונים עדיין");
-  var maxAbs = Math.max.apply(null, data.map(function(d) { return Math.abs(d.balance); }).concat([1]));
+  var maxAbs = Math.max.apply(null, data.filter(function(d) { return !d.excluded; }).map(function(d) { return Math.abs(d.balance); }).concat([1]));
   var H = 172;
   function idxFromX(cx) {
     var el = wrapRef.current; if (!el) return null;
@@ -201,19 +202,25 @@ function BarChart(props) {
   return h("div", { style: { position: "relative" } },
     ad ? h("div", { style: { position: "absolute", top: 0, left: leftPct + "%", transform: "translate(-50%,-106%)", zIndex: 8, pointerEvents: "none", background: "rgba(18,24,44,0.98)", border: "1px solid rgba(255,255,255,0.14)", borderRadius: 14, padding: "10px 12px", width: 168, boxShadow: "0 14px 38px rgba(0,0,0,0.55)" } },
       h("div", { style: { fontSize: 12, fontWeight: 800, color: "#fff", marginBottom: 5 } }, fmtDate(ad.date)),
-      h("div", { style: { fontSize: 14, fontWeight: 900, color: ad.balance <= 0 ? "#34d399" : "#fb7185", marginBottom: 4 } }, (ad.balance <= 0 ? "גרעון " : "עודף ") + Math.abs(Math.round(ad.balance)) + " קק״ל"),
-      tipRow("צרכתי", Math.round(ad.eaten) + " קק״ל"),
-      tipRow("הוצאה", Math.round(ad.burned) + " קק״ל", "#fb923c"),
-      h("div", { style: { borderTop: "1px solid rgba(255,255,255,0.1)", marginTop: 6, paddingTop: 4 } },
-        tipRow("חלבון", Math.round(ad.p) + "g", "#60a5fa"),
-        tipRow("פחמימות", Math.round(ad.c) + "g", "#fbbf24"),
-        tipRow("שומן", Math.round(ad.f) + "g", "#f472b6"))) : null,
+      ad.excluded ? h("div", { style: { fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.45)", marginTop: 2 } }, "🚫 יום לא נספר") : h(React.Fragment, null,
+        h("div", { style: { fontSize: 14, fontWeight: 900, color: ad.balance <= 0 ? "#34d399" : "#fb7185", marginBottom: 4 } }, (ad.balance <= 0 ? "גרעון " : "עודף ") + Math.abs(Math.round(ad.balance)) + " קק״ל"),
+        tipRow("צרכתי", Math.round(ad.eaten) + " קק״ל"),
+        tipRow("הוצאה", Math.round(ad.burned) + " קק״ל", "#fb923c"),
+        h("div", { style: { borderTop: "1px solid rgba(255,255,255,0.1)", marginTop: 6, paddingTop: 4 } },
+          tipRow("חלבון", Math.round(ad.p) + "g", "#60a5fa"),
+          tipRow("פחמימות", Math.round(ad.c) + "g", "#fbbf24"),
+          tipRow("שומן", Math.round(ad.f) + "g", "#f472b6")))) : null,
     h("div", { ref: wrapRef, onPointerDown: onDown, onPointerMove: onMove, onPointerUp: onUp, onPointerLeave: onUp, onPointerCancel: onUp,
       style: { position: "relative", height: H, display: "flex", direction: "ltr", alignItems: "stretch", gap: data.length > 20 ? 1 : 2, touchAction: "pan-y", cursor: "pointer" } },
       h("div", { style: { position: "absolute", left: 0, right: 0, top: "50%", height: 1, background: "rgba(255,255,255,0.12)" } }),
       data.map(function(d, i) {
+        var isA = active === i;
+        if (d.excluded) {
+          return h("div", { key: i, style: { flex: 1, position: "relative" } },
+            h("div", { style: { position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,-50%)", width: data.length > 20 ? "64%" : "56%", height: 4, background: "rgba(255,255,255,0.16)", borderRadius: 2, opacity: active == null || isA ? 1 : 0.4 } }));
+        }
         var bh = Math.abs(d.balance) / maxAbs * (H / 2 - 8);
-        var deficit = d.balance <= 0, isA = active === i;
+        var deficit = d.balance <= 0;
         return h("div", { key: i, style: { flex: 1, position: "relative" } },
           h("div", { style: { position: "absolute", left: "50%", transform: "translateX(-50%)", width: data.length > 20 ? "64%" : "56%",
             top: deficit ? "50%" : "auto", bottom: deficit ? "auto" : "50%", height: Math.max(bh, 2),
@@ -394,19 +401,25 @@ function FoodModal(props) {
   var saved = props.saved, onAdd = props.onAdd, onClose = props.onClose;
   var s1 = useState(props.initialTab || "text"); var tab = s1[0], setTab = s1[1];
   var s2 = useState(""); var text = s2[0], setText = s2[1];
-  var s3 = useState(null); var img64 = s3[0], setImg64 = s3[1];
+  var s3 = useState([]); var imgs = s3[0], setImgs = s3[1];
   var s4 = useState(null); var result = s4[0], setResult = s4[1];
   var s5 = useState(false); var busy = s5[0], setBusy = s5[1];
   var s6 = useState(false); var saving = s6[0], setSaving = s6[1];
   var s7 = useState(false); var saveAs = s7[0], setSaveAs = s7[1];
   var s8 = useState(""); var err = s8[0], setErr = s8[1];
   var fileRefCam = useRef(); var fileRefGallery = useRef();
-  function pickFile(e) { if (e.target.files && e.target.files[0]) fileToB64(e.target.files[0]).then(setImg64); e.target.value = ""; }
-  function switchTab(t) { setTab(t); setResult(null); setErr(""); setText(""); setImg64(null); }
+  function pickFile(e) {
+    var files = e.target.files ? Array.prototype.slice.call(e.target.files) : [];
+    e.target.value = "";
+    if (!files.length) return;
+    Promise.all(files.map(fileToB64)).then(function(arr) { setImgs(function(p) { return p.concat(arr); }); });
+  }
+  function removeImg(idx) { setImgs(function(p) { return p.filter(function(_, i) { return i !== idx; }); }); }
+  function switchTab(t) { setTab(t); setResult(null); setErr(""); setText(""); setImgs([]); }
   function analyze() {
-    if (!text && !img64) return;
+    if (!text && !imgs.length) return;
     setBusy(true); setErr(""); setResult(null);
-    analyzeFood(text, img64).then(function(r) {
+    analyzeFood(text, imgs).then(function(r) {
       setResult({ meal_name: r.meal_name || "", calories: r.calories || 0, protein: r.protein || 0, carbs: r.carbs || 0, fat: r.fat || 0, _portion: r.portion_estimate || "", _reasoning: r.reasoning || "", _items: Array.isArray(r.items) ? r.items : [] });
     }).catch(function(e) { setErr("\u05e9\u05d2\u05d9\u05d0\u05d4: " + ((e && e.message) ? e.message : "\u05e0\u05e1\u05d4 \u05e9\u05d5\u05d1")); }).finally(function() { setBusy(false); });
   }
@@ -433,19 +446,23 @@ function FoodModal(props) {
         style: { width: "100%", height: 90, background: "rgba(255,255,255,0.06)", border: "1px solid " + BORD, borderRadius: 12, padding: 12, fontSize: 16, color: "#fff", resize: "none", outline: "none", boxSizing: "border-box" } }),
       h(GradBtn, { onClick: analyze, disabled: !text || busy, style: { marginTop: 10 } }, busy ? h(IconLoader, { size: 16 }) : null, busy ? " \u05de\u05e0\u05ea\u05d7..." : "\u2728 \u05e0\u05ea\u05d7")),
     tab === "photo" && h(React.Fragment, null,
-      h("div", { onClick: function() { fileRefGallery.current && fileRefGallery.current.click(); }, style: { border: "2px dashed " + (img64 ? "#4f46e5" : BORD), borderRadius: 16, padding: img64 ? "12px" : "26px 0", textAlign: "center", cursor: "pointer", marginBottom: 10 } },
-        img64 ? h("div", null,
-          h("img", { src: "data:image/jpeg;base64," + img64, alt: "תצוגה מקדימה", style: { width: "100%", maxHeight: 190, objectFit: "cover", borderRadius: 14, marginBottom: 10, display: "block" } }),
-          h("div", { style: { color: "#10b981", fontWeight: 700, fontSize: 13 } }, "✅ תמונה נטענה — לחץ להחלפה")) :
-        h(React.Fragment, null, h("div", { style: { fontSize: 36, marginBottom: 6 } }, "🍽️"), h("div", { style: { fontSize: 13, color: "rgba(255,255,255,0.3)" } }, "בחר תמונה לניתוח"))),
+      imgs.length ? h("div", { style: { display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 } },
+        imgs.map(function(b, idx) {
+          return h("div", { key: idx, style: { position: "relative", width: 84, height: 84 } },
+            h("img", { src: "data:image/jpeg;base64," + b, style: { width: "100%", height: "100%", objectFit: "cover", borderRadius: 12, display: "block" } }),
+            h("button", { onClick: function() { removeImg(idx); }, style: { position: "absolute", top: -6, insetInlineEnd: -6, width: 22, height: 22, borderRadius: "50%", background: "rgba(15,20,36,0.95)", border: "1px solid rgba(255,255,255,0.25)", color: "#fff", fontSize: 14, lineHeight: 1, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0, minHeight: 0 } }, "×"));
+        })) :
+        h("div", { onClick: function() { fileRefGallery.current && fileRefGallery.current.click(); }, style: { border: "2px dashed " + BORD, borderRadius: 16, padding: "26px 0", textAlign: "center", cursor: "pointer", marginBottom: 10 } },
+          h("div", { style: { fontSize: 36, marginBottom: 6 } }, "🍽️"),
+          h("div", { style: { fontSize: 13, color: "rgba(255,255,255,0.3)" } }, "בחר תמונה אחת או יותר לניתוח")),
       h("div", { style: { display: "flex", gap: 8, marginBottom: 10 } },
         h("button", { onClick: function() { fileRefCam.current && fileRefCam.current.click(); }, style: { flex: 1, padding: "11px 0", borderRadius: 12, background: "rgba(255,255,255,0.06)", border: "1px solid " + BORD, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" } }, "📷 צלם תמונה"),
-        h("button", { onClick: function() { fileRefGallery.current && fileRefGallery.current.click(); }, style: { flex: 1, padding: "11px 0", borderRadius: 12, background: "rgba(255,255,255,0.06)", border: "1px solid " + BORD, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" } }, "🖼️ העלה מהמכשיר")),
+        h("button", { onClick: function() { fileRefGallery.current && fileRefGallery.current.click(); }, style: { flex: 1, padding: "11px 0", borderRadius: 12, background: "rgba(255,255,255,0.06)", border: "1px solid " + BORD, color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer" } }, imgs.length ? "🖼️ הוסף עוד" : "🖼️ העלה מהמכשיר")),
       h("input", { ref: fileRefCam, type: "file", accept: "image/*", capture: "environment", style: { display: "none" }, onChange: pickFile }),
-      h("input", { ref: fileRefGallery, type: "file", accept: "image/*", style: { display: "none" }, onChange: pickFile }),
+      h("input", { ref: fileRefGallery, type: "file", accept: "image/*", multiple: true, style: { display: "none" }, onChange: pickFile }),
       h("textarea", { placeholder: "תיאור נוסף (אופציונלי)...", value: text, onChange: function(e) { setText(e.target.value); },
         style: { width: "100%", height: 56, background: "rgba(255,255,255,0.06)", border: "1px solid " + BORD, borderRadius: 12, padding: 12, fontSize: 16, color: "#fff", resize: "none", outline: "none", boxSizing: "border-box", marginBottom: 10 } }),
-      h(GradBtn, { onClick: analyze, disabled: !img64 || busy }, busy ? h(IconLoader, { size: 16 }) : null, busy ? " מנתח..." : "✨ נתח תמונה")),
+      h(GradBtn, { onClick: analyze, disabled: !imgs.length || busy }, busy ? h(IconLoader, { size: 16 }) : null, busy ? " מנתח..." : (imgs.length > 1 ? "✨ נתח " + imgs.length + " תמונות" : "✨ נתח תמונה"))),
     tab === "saved" && h("div", { style: { maxHeight: 300, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 } },
       saved.length === 0 ? h(Empty, { text: "\u05d0\u05d9\u05df \u05de\u05e0\u05d5\u05ea \u05e9\u05de\u05d5\u05e8\u05d5\u05ea" }) :
       saved.map(function(m) {
@@ -613,6 +630,7 @@ function CalTrack() {
   var s15 = useState("text"); var initialFoodTab = s15[0], setInitialFoodTab = s15[1];
   var s16 = useState([]); var dayMeals = s16[0], setDayMeals = s16[1];
   var s17 = useState([]); var dayBurns = s17[0], setDayBurns = s17[1];
+  var s18 = useState(function() { try { return JSON.parse(localStorage.getItem("excluded_days") || "[]"); } catch (e) { return []; } }); var excludedDays = s18[0], setExcludedDays = s18[1];
   function openFood(tab) { setInitialFoodTab(tab || "text"); setModal("food"); }
 
   function closeModal() { setModal(null); setEditTarget(null); }
@@ -705,7 +723,7 @@ function CalTrack() {
   var todayF = meals.reduce(function(s, m) { return s + (m.fat || 0); }, 0);
   var proteinTarget = settings.protein_target || computeTargets(settings.tdee, settings.weight, settings.goal).protein;
   var proteinRem = Math.max(proteinTarget - todayP, 0);
-  var histView = hist.map(function(d) { var tb = settings.tdee + (d.burnRaw || 0); return { date: d.date, eaten: d.eaten, p: d.p, c: d.c, f: d.f, burnRaw: d.burnRaw || 0, burned: tb, balance: d.eaten - tb }; });
+  var histView = hist.map(function(d) { var tb = settings.tdee + (d.burnRaw || 0); return { date: d.date, eaten: d.eaten, p: d.p, c: d.c, f: d.f, burnRaw: d.burnRaw || 0, burned: tb, balance: d.eaten - tb, excluded: excludedDays.indexOf(d.date) !== -1 }; });
   var histIdx = histView.findIndex(function(hh) { return hh.date === histDay; });
   var hd = histView[histIdx] || { eaten: 0, burned: 0, burnRaw: 0, balance: 0, p: 0, c: 0, f: 0 };
 
@@ -736,6 +754,13 @@ function CalTrack() {
   function updateBurnHist(id, data) { return sb("manual_burns", "PATCH", { activity: data.activity, calories: +data.calories }, "?id=eq." + id).then(function() { closeModal(); return refreshHistAll(); }); }
   function deleteBurnHist(id) { return sb("manual_burns", "DELETE", null, "?id=eq." + id).then(refreshHistAll); }
   function deleteWholeDay(date) { return Promise.all([sb("meal_logs", "DELETE", null, "?date=eq." + date), sb("manual_burns", "DELETE", null, "?date=eq." + date)]).then(function() { setDayMeals([]); setDayBurns([]); return loadHist(); }); }
+  function toggleExcluded(date) {
+    setExcludedDays(function(prev) {
+      var next = prev.indexOf(date) !== -1 ? prev.filter(function(d) { return d !== date; }) : prev.concat([date]);
+      try { localStorage.setItem("excluded_days", JSON.stringify(next)); } catch (e) {}
+      return next;
+    });
+  }
   function saveSettings(s) {
     return sb("user_settings", "POST", Object.assign({ id: 1 }, s), "", true).then(function() { setSettings(s); }).catch(function() {});
   }
@@ -850,7 +875,8 @@ function CalTrack() {
               style: { background: "none", border: "none", color: histIdx <= 0 ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.5)", cursor: histIdx <= 0 ? "default" : "pointer", minHeight: 0 } }, h(IconChevR, { size: 24 })),
             h("div", { style: { textAlign: "center" } },
               h("div", { style: { fontWeight: 700, fontSize: 16 } }, fmtDate(histDay)),
-              h("div", { style: { fontSize: 13, fontWeight: 800, marginTop: 2, color: hd.balance <= 0 ? "#34d399" : "#f43f5e" } },
+              hd.excluded ? h("div", { style: { fontSize: 13, fontWeight: 800, marginTop: 2, color: "rgba(255,255,255,0.4)" } }, "🚫 יום לא נספר")
+              : h("div", { style: { fontSize: 13, fontWeight: 800, marginTop: 2, color: hd.balance <= 0 ? "#34d399" : "#f43f5e" } },
                 (hd.balance <= 0 ? "🎯 גרעון " + Math.abs(Math.round(hd.balance)) : "⚠️ עודף " + Math.round(hd.balance)) + " קק״ל")),
             h("button", { onClick: function() { if (histIdx < histView.length - 1) setHistDay(histView[histIdx + 1].date); }, disabled: histIdx >= histView.length - 1,
               style: { background: "none", border: "none", color: histIdx >= histView.length - 1 ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.5)", cursor: histIdx >= histView.length - 1 ? "default" : "pointer", minHeight: 0 } }, h(IconChevL, { size: 24 }))),
@@ -871,8 +897,11 @@ function CalTrack() {
         h(GlassCard, null,
           h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 } },
             h("span", { style: { fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: 1 } }, "רישומי היום"),
-            (dayMeals.length + dayBurns.length) > 0 ? h("button", { onClick: function() { if (window.confirm("למחוק את כל הרישומים של " + fmtDate(histDay) + "?")) deleteWholeDay(histDay); },
-              style: { background: "rgba(244,63,94,0.12)", border: "1px solid rgba(244,63,94,0.3)", borderRadius: 10, padding: "6px 12px", fontSize: 11, fontWeight: 700, color: "#fb7185", cursor: "pointer", minHeight: 0 } }, "מחק יום") : null),
+            h("div", { style: { display: "flex", gap: 6 } },
+              h("button", { onClick: function() { toggleExcluded(histDay); },
+                style: { background: hd.excluded ? "rgba(129,140,248,0.16)" : "rgba(255,255,255,0.06)", border: "1px solid " + (hd.excluded ? "rgba(129,140,248,0.4)" : BORD), borderRadius: 10, padding: "6px 12px", fontSize: 11, fontWeight: 700, color: hd.excluded ? "#a5b4fc" : "rgba(255,255,255,0.6)", cursor: "pointer", minHeight: 0 } }, hd.excluded ? "↩︎ החזר לספירה" : "🚫 לא נספר"),
+              (dayMeals.length + dayBurns.length) > 0 ? h("button", { onClick: function() { if (window.confirm("למחוק את כל הרישומים של " + fmtDate(histDay) + "?")) deleteWholeDay(histDay); },
+                style: { background: "rgba(244,63,94,0.12)", border: "1px solid rgba(244,63,94,0.3)", borderRadius: 10, padding: "6px 12px", fontSize: 11, fontWeight: 700, color: "#fb7185", cursor: "pointer", minHeight: 0 } }, "מחק יום") : null)),
           h("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
             (dayMeals.length === 0 && dayBurns.length === 0) ? h(Empty, { text: "אין רישומים ידניים ליום זה" }) : null,
             dayMeals.map(function(m) {
