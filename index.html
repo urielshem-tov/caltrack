@@ -628,12 +628,41 @@ function CalTrack() {
   var s13 = useState(null); var modal = s13[0], setModal = s13[1];
   var s14 = useState(null); var editTarget = s14[0], setEditTarget = s14[1];
   var s15 = useState("text"); var initialFoodTab = s15[0], setInitialFoodTab = s15[1];
+  var s19 = useState(null); var addDate = s19[0], setAddDate = s19[1];
+  var s20 = useState(null); var undo = s20[0], setUndo = s20[1];
+  var s21 = useState(false); var syncing = s21[0], setSyncing = s21[1];
+  var undoTimer = useRef(null);
   var s16 = useState([]); var dayMeals = s16[0], setDayMeals = s16[1];
   var s17 = useState([]); var dayBurns = s17[0], setDayBurns = s17[1];
   var s18 = useState(function() { try { return JSON.parse(localStorage.getItem("excluded_days") || "[]"); } catch (e) { return []; } }); var excludedDays = s18[0], setExcludedDays = s18[1];
-  function openFood(tab) { setInitialFoodTab(tab || "text"); setModal("food"); }
+  function openFood(tab) { setAddDate(null); setInitialFoodTab(tab || "text"); setModal("food"); }
+  function openFoodFor(date, tab) { setAddDate(date); setInitialFoodTab(tab || "text"); setModal("food"); }
+  function openBurn() { setAddDate(null); setModal("burn"); }
+  function openBurnFor(date) { setAddDate(date); setModal("burn"); }
+  function showUndo(label, restore) {
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    setUndo({ label: label, restore: restore });
+    undoTimer.current = setTimeout(function() { setUndo(null); }, 6000);
+  }
+  function doUndo() {
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    var u = undo; setUndo(null);
+    if (u && u.restore) u.restore();
+  }
+  function restoreMeal(m, refresh) { return sb("meal_logs", "POST", { date: m.date, meal_name: m.meal_name, calories: m.calories, protein: m.protein, carbs: m.carbs, fat: m.fat }).then(refresh); }
+  function restoreBurn(b, refresh) { return sb("manual_burns", "POST", { date: b.date, activity: b.activity, calories: b.calories }).then(refresh); }
+  function syncNow() {
+    setSyncing(true);
+    fetch("/.netlify/functions/sync", { method: "POST" })
+      .then(function(r) { return r.json().catch(function() { return {}; }); })
+      .then(function(res) {
+        if (res && res.ok === false) { setSyncing(false); window.alert("סנכרון נכשל" + (res.status ? " (" + res.status + ")" : "") + ". נסה שוב בעוד רגע."); return; }
+        setTimeout(function() { loadToday(); setSyncing(false); }, 28000);
+      })
+      .catch(function() { setSyncing(false); window.alert("שגיאת רשת בסנכרון. ודא שהפונקציה מותקנת."); });
+  }
 
-  function closeModal() { setModal(null); setEditTarget(null); }
+  function closeModal() { setModal(null); setEditTarget(null); setAddDate(null); }
   function connect() {
     var u = sbUrl.trim(), k = sbKey.trim();
     if (!u || !k) return;
@@ -728,31 +757,33 @@ function CalTrack() {
   var hd = histView[histIdx] || { eaten: 0, burned: 0, burnRaw: 0, balance: 0, p: 0, c: 0, f: 0 };
 
   function addMeal(meal, saveAsM) {
-    return sb("meal_logs", "POST", { date: todayStr(), meal_name: meal.meal_name, calories: +meal.calories, protein: +meal.protein, carbs: +meal.carbs, fat: +meal.fat })
+    var d = addDate || todayStr(); var isHist = !!addDate;
+    return sb("meal_logs", "POST", { date: d, meal_name: meal.meal_name, calories: +meal.calories, protein: +meal.protein, carbs: +meal.carbs, fat: +meal.fat })
       .then(function() { if (saveAsM) return sb("saved_meals", "POST", { name: meal.meal_name, calories: +meal.calories, protein: +meal.protein, carbs: +meal.carbs, fat: +meal.fat }); })
-      .then(function() { closeModal(); return loadToday(); });
+      .then(function() { closeModal(); return isHist ? refreshHistAll() : loadToday(); });
   }
   function updateMeal(id, data) {
     return sb("meal_logs", "PATCH", { meal_name: data.meal_name, calories: +data.calories, protein: +data.protein, carbs: +data.carbs, fat: +data.fat }, "?id=eq." + id)
       .then(function() { closeModal(); return loadToday(); });
   }
-  function deleteMeal(id) { return sb("meal_logs", "DELETE", null, "?id=eq." + id).then(loadToday); }
+  function deleteMeal(m) { return sb("meal_logs", "DELETE", null, "?id=eq." + m.id).then(function() { showUndo("המנה נמחקה", function() { return restoreMeal(m, loadToday); }); return loadToday(); }); }
   function addBurn(b) {
-    return sb("manual_burns", "POST", { date: todayStr(), activity: b.activity, calories: +b.calories })
-      .then(function() { closeModal(); return loadToday(); });
+    var d = addDate || todayStr(); var isHist = !!addDate;
+    return sb("manual_burns", "POST", { date: d, activity: b.activity, calories: +b.calories })
+      .then(function() { closeModal(); return isHist ? refreshHistAll() : loadToday(); });
   }
   function updateBurn(id, data) {
     return sb("manual_burns", "PATCH", { activity: data.activity, calories: +data.calories }, "?id=eq." + id)
       .then(function() { closeModal(); return loadToday(); });
   }
-  function deleteBurn(id) { return sb("manual_burns", "DELETE", null, "?id=eq." + id).then(loadToday); }
+  function deleteBurn(b) { return sb("manual_burns", "DELETE", null, "?id=eq." + b.id).then(function() { showUndo("הפעילות נמחקה", function() { return restoreBurn(b, loadToday); }); return loadToday(); }); }
   function addSaved(m) { return sb("saved_meals", "POST", m).then(function() { closeModal(); return loadSaved(); }); }
   function deleteSaved(id) { return sb("saved_meals", "DELETE", null, "?id=eq." + id).then(loadSaved); }
   function refreshHistAll() { return loadHist().then(function() { return loadDayDetail(histDay); }); }
   function updateMealHist(id, data) { return sb("meal_logs", "PATCH", { meal_name: data.meal_name, calories: +data.calories, protein: +data.protein, carbs: +data.carbs, fat: +data.fat }, "?id=eq." + id).then(function() { closeModal(); return refreshHistAll(); }); }
-  function deleteMealHist(id) { return sb("meal_logs", "DELETE", null, "?id=eq." + id).then(refreshHistAll); }
+  function deleteMealHist(m) { return sb("meal_logs", "DELETE", null, "?id=eq." + m.id).then(function() { showUndo("המנה נמחקה", function() { return restoreMeal(m, refreshHistAll); }); return refreshHistAll(); }); }
   function updateBurnHist(id, data) { return sb("manual_burns", "PATCH", { activity: data.activity, calories: +data.calories }, "?id=eq." + id).then(function() { closeModal(); return refreshHistAll(); }); }
-  function deleteBurnHist(id) { return sb("manual_burns", "DELETE", null, "?id=eq." + id).then(refreshHistAll); }
+  function deleteBurnHist(b) { return sb("manual_burns", "DELETE", null, "?id=eq." + b.id).then(function() { showUndo("הפעילות נמחקה", function() { return restoreBurn(b, refreshHistAll); }); return refreshHistAll(); }); }
   function deleteWholeDay(date) { return Promise.all([sb("meal_logs", "DELETE", null, "?date=eq." + date), sb("manual_burns", "DELETE", null, "?date=eq." + date)]).then(function() { setDayMeals([]); setDayBurns([]); return loadHist(); }); }
   function toggleExcluded(date) {
     setExcludedDays(function(prev) {
@@ -795,7 +826,7 @@ function CalTrack() {
           h(StatChip, { label: "\u05d9\u05e2\u05d3 \u05e7\u05e7\u05f4\u05dc", val: targetCal, color: "#818cf8" }),
           h(StatChip, { label: "\u05e9\u05e8\u05d9\u05e4\u05d4 \u05e6\u05e4\u05d5\u05d9\u05d4", val: projectedBurn, color: "#fb923c" }))),
       // Quick actions
-      h(QuickActions, { onFood: openFood, onBurn: function() { setModal("burn"); } }),
+      h(QuickActions, { onFood: openFood, onBurn: openBurn }),
       // Forecast
       h(GlassCard, { style: { padding: 14 } },
         h("div", { style: { fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.3)", letterSpacing: 1, textTransform: "uppercase", marginBottom: 10 } }, "\u{1f4ca} \u05ea\u05d7\u05d6\u05d9\u05ea \u05dc\u05e1\u05d5\u05e3 \u05d4\u05d9\u05d5\u05dd"),
@@ -806,7 +837,9 @@ function CalTrack() {
           h(FRow, { label: "\u05e0\u05d5\u05ea\u05e8 \u05dc\u05d0\u05db\u05d9\u05dc\u05d4 \u05dc\u05e4\u05d9 \u05d9\u05e2\u05d3", val: Math.max(remaining, 0), color: "#818cf8" }))),
       // Garmin
       h("div", { style: { background: "rgba(255,255,255,0.03)", border: "1px solid " + BORD, borderRadius: 16, padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center" } },
-        h("span", { style: { fontSize: 13, color: "rgba(255,255,255,0.3)" } }, "\u231a \u05d2\u05e8\u05de\u05d9\u05df"),
+        h("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
+          h("span", { style: { fontSize: 13, color: "rgba(255,255,255,0.3)" } }, "\u231a \u05d2\u05e8\u05de\u05d9\u05df"),
+          h("button", { onClick: syncNow, disabled: syncing, style: { background: "rgba(129,140,248,0.14)", border: "1px solid rgba(129,140,248,0.35)", borderRadius: 8, padding: "4px 10px", fontSize: 11, fontWeight: 700, color: syncing ? "rgba(165,180,252,0.5)" : "#a5b4fc", cursor: syncing ? "default" : "pointer", minHeight: 0 } }, syncing ? "\u23f3 \u05de\u05e1\u05e0\u05db\u05e8\u05df\u2026" : "\ud83d\udd04 \u05e1\u05e0\u05db\u05e8\u05df")),
         garmin ? h("div", { style: { display: "flex", gap: 16, fontSize: 12, color: "rgba(255,255,255,0.5)" } },
           h("span", null, "\u{1f6b6} " + (garmin.steps || 0).toLocaleString()),
           h("span", null, "\u{1f525} " + (garmin.calories_active || "\u2014")),
@@ -842,13 +875,13 @@ function CalTrack() {
                 sub: m.protein ? ("\u05d7\u05dc\u05f3 " + Math.round(m.protein) + "g \u00b7 \u05e4\u05d7\u05f3 " + Math.round(m.carbs) + "g \u00b7 \u05e9\u05d5\u05de\u05df " + Math.round(m.fat) + "g") : "",
                 val: m.calories + " \u05e7\u05e7\u05f4\u05dc",
                 onEdit: function() { setEditTarget({ type: "meal", item: m }); setModal("edit"); },
-                onDel: function() { deleteMeal(m.id); } });
+                onDel: function() { deleteMeal(m); } });
             }),
             h("div", { style: { fontSize: 12, color: "rgba(255,255,255,0.25)", textAlign: "left", paddingRight: 4 } },
               "\u05e1\u05d4\u05f4\u05db: ", h("span", { style: { color: "rgba(255,255,255,0.6)", fontWeight: 700 } }, totalEaten.toLocaleString()), " \u05e7\u05e7\u05f4\u05dc")))),
       // Burns
       h("div", null,
-        h(SecHdr, { title: "\u05e9\u05e8\u05d9\u05e4\u05d5\u05ea", onAdd: function() { setModal("burn"); }, addColor: "#ea580c" }),
+        h(SecHdr, { title: "\u05e9\u05e8\u05d9\u05e4\u05d5\u05ea", onAdd: openBurn, addColor: "#ea580c" }),
         h("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
           garmin ? h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", background: "rgba(255,255,255,0.03)", border: "1px solid " + BORD, borderRadius: 14, padding: "11px 14px" } },
             h("span", { style: { fontSize: 13, color: "rgba(255,255,255,0.3)" } }, "\u231a \u05d2\u05e8\u05de\u05d9\u05df \u05d0\u05d5\u05d8\u05d5\u05de\u05d8\u05d9"),
@@ -856,7 +889,7 @@ function CalTrack() {
           burns.map(function(b) {
             return h(EntryRow, { key: b.id, title: b.activity, val: b.calories + " \u05e7\u05e7\u05f4\u05dc", valColor: "#fb923c",
               onEdit: function() { setEditTarget({ type: "burn", item: b }); setModal("edit"); },
-              onDel: function() { deleteBurn(b.id); } });
+              onDel: function() { deleteBurn(b); } });
           }),
           !garmin && burns.length === 0 ? h(Empty, { text: "\u05d0\u05d9\u05df \u05e9\u05e8\u05d9\u05e4\u05d5\u05ea \u05d9\u05d3\u05e0\u05d9\u05d5\u05ea" }) : null)));
   }
@@ -902,6 +935,9 @@ function CalTrack() {
                 style: { background: hd.excluded ? "rgba(129,140,248,0.16)" : "rgba(255,255,255,0.06)", border: "1px solid " + (hd.excluded ? "rgba(129,140,248,0.4)" : BORD), borderRadius: 10, padding: "6px 12px", fontSize: 11, fontWeight: 700, color: hd.excluded ? "#a5b4fc" : "rgba(255,255,255,0.6)", cursor: "pointer", minHeight: 0 } }, hd.excluded ? "↩︎ החזר לספירה" : "🚫 לא נספר"),
               (dayMeals.length + dayBurns.length) > 0 ? h("button", { onClick: function() { if (window.confirm("למחוק את כל הרישומים של " + fmtDate(histDay) + "?")) deleteWholeDay(histDay); },
                 style: { background: "rgba(244,63,94,0.12)", border: "1px solid rgba(244,63,94,0.3)", borderRadius: 10, padding: "6px 12px", fontSize: 11, fontWeight: 700, color: "#fb7185", cursor: "pointer", minHeight: 0 } }, "מחק יום") : null)),
+          h("div", { style: { display: "flex", gap: 8, marginBottom: 10 } },
+            h("button", { onClick: function() { openFoodFor(histDay, "text"); }, style: { flex: 1, background: "rgba(79,70,229,0.14)", border: "1px solid rgba(129,140,248,0.32)", borderRadius: 12, padding: "10px 0", fontSize: 13, fontWeight: 700, color: "#a5b4fc", cursor: "pointer" } }, "➕ הוסף מנה"),
+            h("button", { onClick: function() { openBurnFor(histDay); }, style: { flex: 1, background: "rgba(234,88,12,0.14)", border: "1px solid rgba(251,146,60,0.32)", borderRadius: 12, padding: "10px 0", fontSize: 13, fontWeight: 700, color: "#fb923c", cursor: "pointer" } }, "➕ הוסף פעילות")),
           h("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
             (dayMeals.length === 0 && dayBurns.length === 0) ? h(Empty, { text: "אין רישומים ידניים ליום זה" }) : null,
             dayMeals.map(function(m) {
@@ -909,12 +945,12 @@ function CalTrack() {
                 sub: m.protein ? ("חל׳ " + Math.round(m.protein) + "g · פח׳ " + Math.round(m.carbs) + "g · שומן " + Math.round(m.fat) + "g") : "",
                 val: m.calories + " קק״ל",
                 onEdit: function() { setEditTarget({ type: "meal", item: m, ctx: "history" }); setModal("edit"); },
-                onDel: function() { deleteMealHist(m.id); } });
+                onDel: function() { deleteMealHist(m); } });
             }),
             dayBurns.map(function(b) {
               return h(EntryRow, { key: "b" + b.id, title: b.activity, val: b.calories + " קק״ל", valColor: "#fb923c",
                 onEdit: function() { setEditTarget({ type: "burn", item: b, ctx: "history" }); setModal("edit"); },
-                onDel: function() { deleteBurnHist(b.id); } });
+                onDel: function() { deleteBurnHist(b); } });
             }),
             h("div", { style: { fontSize: 11, color: "rgba(255,255,255,0.25)", textAlign: "center", paddingTop: 4, lineHeight: 1.5 } }, "ההוצאה הכוללת = TDEE בסיסי (" + settings.tdee + ") + שריפת Garmin + פעילות ידנית")))
       ) : null);
@@ -949,7 +985,10 @@ function CalTrack() {
         modal === "burn" ? h(BurnModal, { onAdd: addBurn, onClose: closeModal, weight: settings.weight }) : null,
         modal === "addsaved" ? h(AddSavedModal, { onAdd: addSaved, onClose: closeModal }) : null,
         modal === "edit" && editTarget ? h(EditModal, { type: editTarget.type, item: editTarget.item, onSave: editTarget.ctx === "history" ? (editTarget.type === "meal" ? updateMealHist : updateBurnHist) : (editTarget.type === "meal" ? updateMeal : updateBurn), onClose: closeModal }) : null,
-        modal === "recommend" ? h(RecommendModal, { remaining: remaining, protein: todayP, carbs: todayC, fat: todayF, goal: settings.goal, proteinRem: proteinRem, onAdd: function(m) { return addMeal(m, false); }, onClose: closeModal }) : null)) : null);
+        modal === "recommend" ? h(RecommendModal, { remaining: remaining, protein: todayP, carbs: todayC, fat: todayF, goal: settings.goal, proteinRem: proteinRem, onAdd: function(m) { return addMeal(m, false); }, onClose: closeModal }) : null)) : null,
+    undo ? h("div", { style: { position: "fixed", left: "50%", bottom: "calc(90px + env(safe-area-inset-bottom))", transform: "translateX(-50%)", zIndex: 60, background: "rgba(18,24,44,0.98)", border: "1px solid rgba(255,255,255,0.16)", borderRadius: 14, padding: "10px 16px", display: "flex", alignItems: "center", gap: 16, boxShadow: "0 12px 34px rgba(0,0,0,0.5)", maxWidth: "90%" } },
+      h("span", { style: { fontSize: 13, color: "rgba(255,255,255,0.85)" } }, undo.label),
+      h("button", { onClick: doUndo, style: { background: "none", border: "none", color: "#a5b4fc", fontSize: 13, fontWeight: 800, cursor: "pointer", minHeight: 0, padding: 0 } }, "↩︎ בטל")) : null);
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(CalTrack));
